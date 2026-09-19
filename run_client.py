@@ -129,8 +129,27 @@ Examples:
             elif user_input.lower() == "/start":
                 client.send_start_game()
 
+            elif user_input.lower().startswith("/vote "):
+                target = user_input[6:].strip()
+                if target:
+                    client.send_vote(target)
+                else:
+                    print(f"  {Fore.RED}Usage: /vote <player_name>{Style.RESET_ALL}")
+
+            elif user_input.lower().startswith("/kill "):
+                target = user_input[6:].strip()
+                if target:
+                    client.send_night_action(target)
+                else:
+                    print(f"  {Fore.RED}Usage: /kill <player_name>{Style.RESET_ALL}")
+
             elif user_input.lower() == "/players":
-                if client.lobby_players:
+                if client.alive_players:
+                    print(f"\n  {Style.BRIGHT}Alive players:{Style.RESET_ALL}")
+                    for i, name in enumerate(client.alive_players, 1):
+                        print(f"    {i}. {name}")
+                    print()
+                elif client.lobby_players:
                     print(f"\n  {Style.BRIGHT}Players in lobby:{Style.RESET_ALL}")
                     for i, name in enumerate(client.lobby_players, 1):
                         print(f"    {i}. {name}")
@@ -138,12 +157,22 @@ Examples:
                 else:
                     print(f"  {Fore.YELLOW}No player list available yet.{Style.RESET_ALL}")
 
+            elif user_input.lower() == "/role":
+                if client.role:
+                    role_color = Fore.RED if client.role == "Mafia" else Fore.GREEN
+                    print(f"\n  Your role: {role_color}{Style.BRIGHT}{client.role}{Style.RESET_ALL} ({client.team})\n")
+                else:
+                    print(f"  {Style.DIM}No role assigned yet. Game hasn't started.{Style.RESET_ALL}")
+
             elif user_input.lower() == "/help":
                 print(f"\n  {Style.BRIGHT}Commands:{Style.RESET_ALL}")
-                print(f"    /start   — Start the game (need min players)")
-                print(f"    /players — Show players in lobby")
-                print(f"    /quit    — Leave the game")
-                print(f"    /help    — Show this help")
+                print(f"    /start      — Start the game (need min players)")
+                print(f"    /vote <name> — Vote to eliminate a player (day phase)")
+                print(f"    /kill <name> — Choose a night target (Mafia only)")
+                print(f"    /players    — Show alive players")
+                print(f"    /role       — Show your current role")
+                print(f"    /quit       — Leave the game")
+                print(f"    /help       — Show this help")
                 print(f"    (anything else) — Send as chat message\n")
 
             elif user_input.startswith("/"):

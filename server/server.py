@@ -16,12 +16,13 @@ import json
 
 from common.constants import (
     DEFAULT_HOST, DEFAULT_PORT, BUFFER_SIZE, MESSAGE_DELIMITER,
-    MIN_PLAYERS, MAX_PLAYERS, PHASE_LOBBY
+    MIN_PLAYERS, MAX_PLAYERS, PHASE_LOBBY, PHASE_GAME_OVER
 )
 from common.protocol import (
     parse_messages, msg_welcome, msg_player_joined, msg_player_left,
     msg_lobby_status, msg_error, msg_server_announcement, msg_ping,
     MSG_JOIN, MSG_CHAT, MSG_PONG, MSG_START_GAME,
+    MSG_VOTE, MSG_NIGHT_ACTION,
     create_message, MSG_CHAT_MSG
 )
 from common.utils import generate_player_id, sanitize_name, get_local_ip
@@ -93,6 +94,9 @@ class GameServer:
         # Game state
         self.phase = PHASE_LOBBY
         self.running = False
+
+        # Game engine (initialized on first game start)
+        self.game_engine = None
 
         # Heartbeat
         self._heartbeat_thread = None
@@ -240,9 +244,18 @@ class GameServer:
                     # Notify remaining players
                     self.broadcast(msg_player_left(player.name, player_count))
 
-                    # Send updated lobby status if still in lobby
                     if self.phase == PHASE_LOBBY:
+                        # Send updated lobby status
                         self._broadcast_lobby_status()
+                    elif self.phase != PHASE_GAME_OVER and self.game_engine:
+                        # Mid-game disconnect: mark player dead and check win
+                        self.game_engine.state.handle_player_disconnect(player.player_id)
+                        self.broadcast(msg_server_announcement(
+                            f"💔 {player.name} has disconnected and is out of the game."
+                        ))
+                        win = self.game_engine.state.check_win_condition()
+                        if win:
+                            self.game_engine._end_game()
                 else:
                     print(f"[Server] Connection from {player.addr[0]} dropped (never joined).")
 
@@ -269,6 +282,10 @@ class GameServer:
             player.last_pong = time.time()
         elif msg_type == MSG_START_GAME:
             self._handle_start_game(player)
+        elif msg_type == MSG_VOTE:
+            self._handle_vote(player, data)
+        elif msg_type == MSG_NIGHT_ACTION:
+            self._handle_night_action(player, data)
         else:
             # Unknown or not-yet-implemented message type
             player.send(msg_error(f"Unknown message type: {msg_type}"))
@@ -309,7 +326,7 @@ class GameServer:
         self._broadcast_lobby_status()
 
     def _handle_chat(self, player: PlayerConnection, data: dict):
-        """Handle a chat message from a player — broadcast to all."""
+        """Handle a chat message from a player — broadcast to all or route per game phase."""
         if not player.joined:
             return
 
@@ -317,16 +334,28 @@ class GameServer:
         if not message:
             return
 
+        # During game, enforce phase-specific chat rules
+        if self.game_engine and self.phase != PHASE_LOBBY:
+            result = self.game_engine.handle_chat_in_game(player.player_id, message)
+            if result == "MAFIA_CHAT":
+                return  # Already handled by game engine (private Mafia chat)
+            elif result is not None:
+                player.send(msg_error(result))
+                return
+
+        # Normal broadcast (lobby or discussion phase)
         chat_msg = create_message(MSG_CHAT_MSG, {
             "from": player.name,
             "message": message
         })
-
-        # Broadcast to all connected players
         self.broadcast(chat_msg)
 
     def _handle_start_game(self, player: PlayerConnection):
-        """Handle a request to start the game (placeholder for Phase 2)."""
+        """Handle a request to start the game."""
+        if self.phase != PHASE_LOBBY:
+            player.send(msg_error("A game is already in progress!"))
+            return
+
         with self.players_lock:
             player_count = len(self.players)
 
@@ -336,11 +365,35 @@ class GameServer:
             ))
             return
 
-        # Placeholder — game start logic will be implemented in Phase 2
-        self.broadcast(msg_server_announcement(
-            f"🎮 Game starting with {player_count} players! (Phase 2 — coming soon)"
-        ))
         print(f"[Server] 🎮 Game start requested by {player.name} with {player_count} players.")
+
+        # Initialize and start the game engine
+        from server.game_engine import GameEngine
+        self.game_engine = GameEngine(self)
+        if not self.game_engine.start_game():
+            player.send(msg_error("Failed to start game. Not enough players."))
+            self.game_engine = None
+            return
+
+    def _handle_vote(self, player: PlayerConnection, data: dict):
+        """Handle a VOTE message during day voting phase."""
+        if not self.game_engine:
+            player.send(msg_error("No game in progress."))
+            return
+
+        error = self.game_engine.handle_vote(player.player_id, data)
+        if error:
+            player.send(msg_error(error))
+
+    def _handle_night_action(self, player: PlayerConnection, data: dict):
+        """Handle a NIGHT_ACTION message during night phase."""
+        if not self.game_engine:
+            player.send(msg_error("No game in progress."))
+            return
+
+        error = self.game_engine.handle_night_action(player.player_id, data)
+        if error:
+            player.send(msg_error(error))
 
     # ──────────────────────────────────────────
     # Broadcasting
