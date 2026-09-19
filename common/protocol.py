@@ -42,6 +42,8 @@ MSG_LOBBY_STATUS = "LOBBY_STATUS"      # Current lobby state (player count, wait
 MSG_SERVER_MSG = "SERVER_MSG"          # Generic server announcement
 MSG_LAST_WORDS_BROADCAST = "LAST_WORDS_BROADCAST"  # Broadcast eliminated player's last words
 MSG_SUSPICION_DATA = "SUSPICION_DATA"              # Chat mention counts for suspicion meter
+MSG_INVESTIGATION_RESULT = "INVESTIGATION_RESULT"  # Detective's investigation result (private)
+MSG_SPECTATOR_START = "SPECTATOR_START"            # Player enters spectator mode (all roles revealed)
 
 
 # ══════════════════════════════════════════════

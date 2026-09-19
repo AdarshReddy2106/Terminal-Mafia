@@ -520,3 +520,160 @@ def show_countdown_warning(seconds: int):
         color = Fore.CYAN
     
     print(f"  {color}{Style.BRIGHT}⏰ {seconds} seconds remaining!{Style.RESET_ALL}")
+
+
+# ══════════════════════════════════════════════
+# Detective Display
+# ══════════════════════════════════════════════
+
+def show_investigation_result(target: str, result: str, is_mafia: bool):
+    """Display the Detective's investigation result."""
+    print()
+    if is_mafia:
+        color = Fore.RED
+        icon = "🔴"
+        verdict = "MAFIA"
+    else:
+        color = Fore.GREEN
+        icon = "🟢"
+        verdict = "TOWN"
+    
+    print(f"  {Fore.CYAN}{Style.BRIGHT}┌────── 🔍 INVESTIGATION RESULT ──────┐{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{Style.BRIGHT}│{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{Style.BRIGHT}│  Target: {Fore.WHITE}{target}{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{Style.BRIGHT}│  Finding: {color}{icon} {verdict}{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{Style.BRIGHT}│{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{Style.BRIGHT}└─────────────────────────────────────┘{Style.RESET_ALL}")
+    print(f"  {Style.DIM}Use this knowledge wisely, Detective.{Style.RESET_ALL}")
+    print()
+
+
+def show_doctor_save():
+    """Display that the Doctor saved someone."""
+    print()
+    print(f"  {Fore.GREEN}{Style.BRIGHT}💉 ═══ MIRACULOUS SAVE! ═══ 💉{Style.RESET_ALL}")
+    print(f"  {Fore.GREEN}The Doctor's protection held strong!{Style.RESET_ALL}")
+    print(f"  {Fore.GREEN}The Mafia's target survived the night.{Style.RESET_ALL}")
+    print()
+
+
+# ══════════════════════════════════════════════
+# Spectator Mode Display
+# ══════════════════════════════════════════════
+
+def show_spectator_banner():
+    """Display the spectator mode entry banner."""
+    print()
+    print(f"  {Fore.LIGHTBLACK_EX}{Style.BRIGHT}")
+    print(f"  ╔════════════════════════════════════════╗")
+    print(f"  ║                                        ║")
+    print(f"  ║     👻  S P E C T A T O R  👻         ║")
+    print(f"  ║         M O D E                        ║")
+    print(f"  ║                                        ║")
+    print(f"  ║   You can see everything.              ║")
+    print(f"  ║   You can say nothing.                 ║")
+    print(f"  ║                                        ║")
+    print(f"  ╚════════════════════════════════════════╝")
+    print(f"  {Style.RESET_ALL}")
+
+
+def show_spectator_roles(roles: dict):
+    """Display all roles to a spectator."""
+    print(f"  {Fore.LIGHTBLACK_EX}{Style.BRIGHT}═══ ALL ROLES REVEALED ═══{Style.RESET_ALL}")
+    print(f"  {DIVIDER_THIN}")
+    
+    for name, info in roles.items():
+        role = info.get("role", "?")
+        team = info.get("team", "?")
+        survived = info.get("survived", True)
+        role_color = ROLE_COLORS.get(role, Fore.WHITE)
+        status = f"{Fore.GREEN}alive{Style.RESET_ALL}" if survived else f"{Fore.RED}dead{Style.RESET_ALL}"
+        
+        print(f"    {role_color}{name:12s}  {role:12s}{Style.RESET_ALL}  ({status})")
+    
+    print(f"  {DIVIDER_THIN}")
+    print(f"  {Style.DIM}You can see Mafia chat and vote details.{Style.RESET_ALL}")
+    print()
+
+
+# ══════════════════════════════════════════════
+# Night Banner — Detective & Doctor
+# ══════════════════════════════════════════════
+
+def show_night_detective(round_num: int, duration: int = 0):
+    """Night banner for the Detective."""
+    clear_screen()
+    terminal_bell()
+    
+    print(f"{Fore.BLUE}{Style.BRIGHT}{NIGHT_BANNER}{Style.RESET_ALL}")
+    print(f"  {Fore.BLUE}{Style.BRIGHT}Round {round_num}{Style.RESET_ALL}")
+    
+    if duration:
+        print(f"  {Style.DIM}Time limit: {duration} seconds{Style.RESET_ALL}")
+    
+    print()
+    typewriter(f"  {narrate_night_fall()}", delay=0.015, color=Fore.BLUE)
+    print()
+    
+    print(f"  {Fore.CYAN}{Style.BRIGHT}╔═══════════════════════════════════╗{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{Style.BRIGHT}║  🔍 You are the DETECTIVE.       ║{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{Style.BRIGHT}║     Choose a player to            ║{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{Style.BRIGHT}║     investigate. Use:             ║{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{Style.BRIGHT}║     /investigate <name> or <#>    ║{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{Style.BRIGHT}╚═══════════════════════════════════╝{Style.RESET_ALL}")
+    
+    print(f"\n{Fore.BLUE}{DIVIDER_NIGHT}{Style.RESET_ALL}\n")
+
+
+def show_night_doctor(round_num: int, duration: int = 0):
+    """Night banner for the Doctor."""
+    clear_screen()
+    terminal_bell()
+    
+    print(f"{Fore.BLUE}{Style.BRIGHT}{NIGHT_BANNER}{Style.RESET_ALL}")
+    print(f"  {Fore.BLUE}{Style.BRIGHT}Round {round_num}{Style.RESET_ALL}")
+    
+    if duration:
+        print(f"  {Style.DIM}Time limit: {duration} seconds{Style.RESET_ALL}")
+    
+    print()
+    typewriter(f"  {narrate_night_fall()}", delay=0.015, color=Fore.BLUE)
+    print()
+    
+    print(f"  {Fore.GREEN}{Style.BRIGHT}╔═══════════════════════════════════╗{Style.RESET_ALL}")
+    print(f"  {Fore.GREEN}{Style.BRIGHT}║  💉 You are the DOCTOR.          ║{Style.RESET_ALL}")
+    print(f"  {Fore.GREEN}{Style.BRIGHT}║     Choose a player to protect    ║{Style.RESET_ALL}")
+    print(f"  {Fore.GREEN}{Style.BRIGHT}║     from the Mafia tonight. Use:  ║{Style.RESET_ALL}")
+    print(f"  {Fore.GREEN}{Style.BRIGHT}║     /protect <name> or <#>        ║{Style.RESET_ALL}")
+    print(f"  {Fore.GREEN}{Style.BRIGHT}╚═══════════════════════════════════╝{Style.RESET_ALL}")
+    
+    print(f"\n{Fore.BLUE}{DIVIDER_NIGHT}{Style.RESET_ALL}\n")
+
+
+# ══════════════════════════════════════════════
+# Enhanced Game Over (with special role history)
+# ══════════════════════════════════════════════
+
+def show_match_history(detective_results: list, doctor_saves: list):
+    """Display special role action history at game end."""
+    if detective_results:
+        print(f"\n  {Style.BRIGHT}═══ 🔍 DETECTIVE LOG ═══{Style.RESET_ALL}")
+        print(f"  {DIVIDER_THIN}")
+        for entry in detective_results:
+            r = entry.get("round", "?")
+            target = entry.get("target", "?")
+            result = entry.get("result", "?")
+            icon = "🔴" if result == "Mafia" else "🟢"
+            color = Fore.RED if result == "Mafia" else Fore.GREEN
+            print(f"    Round {r}: Investigated {target} → {color}{icon} {result}{Style.RESET_ALL}")
+        print(f"  {DIVIDER_THIN}")
+    
+    if doctor_saves:
+        print(f"\n  {Style.BRIGHT}═══ 💉 DOCTOR SAVES ═══{Style.RESET_ALL}")
+        print(f"  {DIVIDER_THIN}")
+        for entry in doctor_saves:
+            r = entry.get("round", "?")
+            saved = entry.get("saved", "?")
+            print(f"    Round {r}: {Fore.GREEN}Saved {saved} from death!{Style.RESET_ALL}")
+        print(f"  {DIVIDER_THIN}")
+

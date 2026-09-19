@@ -115,7 +115,13 @@ Examples:
                 print(f"\n  {Fore.YELLOW}Leaving the game...{Style.RESET_ALL}")
                 break
 
-            elif user_input.lower() == "/start":
+            # If spectator, block everything except info commands
+            is_info_command = user_input.lower() in ("/players", "/role", "/suspicion", "/help")
+            if client.is_spectator and not is_info_command and not user_input.startswith("/quit"):
+                print(f"  {Fore.LIGHTBLACK_EX}You are a spectator. You cannot interact with the game.{Style.RESET_ALL}")
+                continue
+
+            if user_input.lower() == "/start":
                 client.send_start_game()
 
             elif user_input.lower().startswith("/vote "):
@@ -128,9 +134,23 @@ Examples:
             elif user_input.lower().startswith("/kill "):
                 target = user_input[6:].strip()
                 if target:
-                    client.send_night_action(target)
+                    client.send_night_action(target, action="kill")
                 else:
                     print(f"  {Fore.RED}Usage: /kill <player_name> or /kill <number>{Style.RESET_ALL}")
+
+            elif user_input.lower().startswith("/investigate "):
+                target = user_input[13:].strip()
+                if target:
+                    client.send_night_action(target, action="investigate")
+                else:
+                    print(f"  {Fore.RED}Usage: /investigate <player_name> or /investigate <number>{Style.RESET_ALL}")
+
+            elif user_input.lower().startswith("/protect "):
+                target = user_input[9:].strip()
+                if target:
+                    client.send_night_action(target, action="protect")
+                else:
+                    print(f"  {Fore.RED}Usage: /protect <player_name> or /protect <number>{Style.RESET_ALL}")
 
             elif user_input.lower() == "/players":
                 if client.alive_players:
@@ -168,6 +188,8 @@ Examples:
                 print(f"    /start         — Start the game (need min players)")
                 print(f"    /vote <name/#> — Vote to eliminate (day phase)")
                 print(f"    /kill <name/#> — Choose night target (Mafia only)")
+                print(f"    /investigate <name/#> — Investigate player (Detective only)")
+                print(f"    /protect <name/#> — Protect player (Doctor only)")
                 print(f"    /players       — Show alive players")
                 print(f"    /role          — Show your current role")
                 print(f"    /suspicion     — Show suspicion meter")

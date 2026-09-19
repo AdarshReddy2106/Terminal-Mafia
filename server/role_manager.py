@@ -3,15 +3,22 @@ role_manager.py — Role assignment logic for Terminal Mafia
 
 Handles:
 - Determining how many Mafia members based on player count
-- Randomly assigning roles to players
+- Randomly assigning roles to players (including special roles)
 - Querying role properties (team, night ability, etc.)
+
+Role Distribution:
+    4 players:  1 Mafia, 3 Villagers
+    5 players:  1 Mafia, 1 Detective, 3 Villagers
+    6 players:  1 Mafia, 1 Detective, 1 Doctor, 3 Villagers
+    7-8 players: 2 Mafia, 1 Detective, 1 Doctor, rest Villagers
+    9+ players:  2 Mafia, 1 Detective, 1 Doctor, 1 Double Agent, rest Villagers
 """
 
 import random
 
 from common.constants import (
     MAFIA_DISTRIBUTION,
-    ROLE_VILLAGER, ROLE_MAFIA,
+    ROLE_VILLAGER, ROLE_MAFIA, ROLE_DETECTIVE, ROLE_DOCTOR, ROLE_DOUBLE_AGENT,
     TEAM_TOWN, TEAM_MAFIA
 )
 
@@ -19,7 +26,7 @@ from common.constants import (
 def get_mafia_count(player_count: int) -> int:
     """
     Determine how many Mafia members to assign based on total player count.
-    
+
     Uses the MAFIA_DISTRIBUTION table from constants:
         4-6 players  → 1 Mafia
         7-9 players  → 2 Mafia
@@ -38,13 +45,19 @@ def get_mafia_count(player_count: int) -> int:
 
 def assign_roles(player_ids: list[str]) -> dict[str, str]:
     """
-    Randomly assign roles to all players.
-    
+    Randomly assign roles to all players, including special roles.
+
+    Assignment order (after Mafia):
+        1. Detective (5+ players)
+        2. Doctor (6+ players)
+        3. Double Agent (9+ players, replaces one Villager on Mafia team)
+        4. Remaining become Villagers
+
     Args:
         player_ids: List of player IDs to assign roles to.
-    
+
     Returns:
-        Dict mapping player_id -> role name (e.g., "Mafia", "Villager")
+        Dict mapping player_id -> role name
     """
     player_count = len(player_ids)
     mafia_count = get_mafia_count(player_count)
@@ -54,21 +67,39 @@ def assign_roles(player_ids: list[str]) -> dict[str, str]:
     random.shuffle(shuffled)
 
     roles = {}
+    idx = 0
 
-    # First N players become Mafia
+    # Assign Mafia
     for i in range(mafia_count):
-        roles[shuffled[i]] = ROLE_MAFIA
+        roles[shuffled[idx]] = ROLE_MAFIA
+        idx += 1
+
+    # Assign Double Agent (9+ players) — on Mafia team but looks Town
+    if player_count >= 9 and idx < player_count:
+        roles[shuffled[idx]] = ROLE_DOUBLE_AGENT
+        idx += 1
+
+    # Assign Detective (5+ players)
+    if player_count >= 5 and idx < player_count:
+        roles[shuffled[idx]] = ROLE_DETECTIVE
+        idx += 1
+
+    # Assign Doctor (6+ players)
+    if player_count >= 6 and idx < player_count:
+        roles[shuffled[idx]] = ROLE_DOCTOR
+        idx += 1
 
     # Remaining players become Villagers
-    for i in range(mafia_count, player_count):
-        roles[shuffled[i]] = ROLE_VILLAGER
+    while idx < player_count:
+        roles[shuffled[idx]] = ROLE_VILLAGER
+        idx += 1
 
     return roles
 
 
 def get_team(role: str) -> str:
     """Get the team a role belongs to."""
-    if role in (ROLE_MAFIA,):
+    if role in (ROLE_MAFIA, ROLE_DOUBLE_AGENT):
         return TEAM_MAFIA
     return TEAM_TOWN
 
@@ -78,5 +109,23 @@ def get_role_description(role: str) -> str:
     descriptions = {
         ROLE_VILLAGER: "You are a Villager. Find and eliminate the Mafia through voting!",
         ROLE_MAFIA: "You are Mafia. Eliminate Villagers at night without being caught!",
+        ROLE_DETECTIVE: (
+            "You are the Detective. Each night, investigate one player to learn "
+            "if they are Mafia or Town. Use /investigate <name> during the night."
+        ),
+        ROLE_DOCTOR: (
+            "You are the Doctor. Each night, choose one player to protect from "
+            "the Mafia's kill. Use /protect <name> during the night."
+        ),
+        ROLE_DOUBLE_AGENT: (
+            "You are the Double Agent. You are on the Mafia team, but if the "
+            "Detective investigates you, you appear as Town! Help the Mafia win "
+            "from the shadows."
+        ),
     }
     return descriptions.get(role, "Unknown role.")
+
+
+def has_night_action(role: str) -> bool:
+    """Check if a role has a night action to perform."""
+    return role in (ROLE_MAFIA, ROLE_DETECTIVE, ROLE_DOCTOR, ROLE_DOUBLE_AGENT)

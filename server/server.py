@@ -13,6 +13,7 @@ import socket
 import threading
 import time
 import json
+import random
 
 from common.constants import (
     DEFAULT_HOST, DEFAULT_PORT, BUFFER_SIZE, MESSAGE_DELIMITER,
@@ -26,6 +27,7 @@ from common.protocol import (
     create_message, MSG_CHAT_MSG, MSG_LAST_WORDS_BROADCAST
 )
 from common.utils import generate_player_id, sanitize_name, get_local_ip
+from bots.bot_player import BotPlayer
 
 
 class PlayerConnection:
@@ -158,6 +160,28 @@ class GameServer:
                 pass
 
         print("[Server] Stopped.")
+
+    def add_bot(self, name: str, model: str = "google/gemma-4-31b-it:free"):
+        """Add an LLM-powered bot player to the server."""
+        if self.phase != PHASE_LOBBY:
+            return False
+
+        with self.players_lock:
+            if len(self.players) >= self.max_players:
+                return False
+
+            bot_id = generate_player_id()
+            bot = BotPlayer(self, bot_id, name, model)
+            
+            self.players[bot_id] = bot
+            player_count = len(self.players)
+
+        print(f"[Server] 🤖 Bot {name} joined the lobby! ({player_count}/{self.max_players})")
+        
+        # Broadcast to everyone
+        self.broadcast(msg_player_joined(name, player_count, self.min_players))
+        self._broadcast_lobby_status()
+        return True
 
     # ──────────────────────────────────────────
     # Connection Management
@@ -342,6 +366,18 @@ class GameServer:
 
         message = data.get("message", "").strip()
         if not message:
+            return
+
+        # Lobby admin commands
+        if self.phase == PHASE_LOBBY and message.lower().startswith("/addbots "):
+            try:
+                count = int(message.split()[1])
+                for i in range(count):
+                    bot_name = f"Bot_{random.randint(100, 999)}"
+                    self.add_bot(bot_name)
+                player.send(msg_server_announcement(f"Added {count} bots."))
+            except (IndexError, ValueError):
+                player.send(msg_error("Usage: /addbots <number>"))
             return
 
         # During game, enforce phase-specific chat rules

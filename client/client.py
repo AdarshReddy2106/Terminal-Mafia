@@ -28,7 +28,8 @@ from common.protocol import (
     MSG_SERVER_MSG, MSG_PHASE_CHANGE, MSG_ROLE_ASSIGN,
     MSG_VOTE_RESULT, MSG_NIGHT_RESULT, MSG_GAME_OVER,
     MSG_START_GAME, MSG_VOTE, MSG_NIGHT_ACTION,
-    MSG_LAST_WORDS, MSG_LAST_WORDS_BROADCAST, MSG_SUSPICION_DATA
+    MSG_LAST_WORDS, MSG_LAST_WORDS_BROADCAST, MSG_SUSPICION_DATA,
+    MSG_INVESTIGATION_RESULT, MSG_SPECTATOR_START
 )
 
 # Try to import colorama for colored output; fall back gracefully
@@ -53,7 +54,10 @@ from client.display import (
     show_voting_banner, show_role_reveal, show_night_kill,
     show_no_kill, show_vote_result, show_game_over,
     show_target_list, show_suspicion_meter, show_last_words,
-    show_lobby, show_countdown_warning, ROLE_COLORS
+    show_lobby, show_countdown_warning, ROLE_COLORS,
+    show_investigation_result, show_doctor_save,
+    show_spectator_banner, show_spectator_roles,
+    show_night_detective, show_night_doctor, show_match_history
 )
 
 
@@ -94,6 +98,8 @@ class GameClient:
         # Target lists for number-based voting
         self._night_targets: list[dict] = []
         self._vote_targets: list[dict] = []
+        self._investigate_targets: list[dict] = []
+        self._protect_targets: list[dict] = []
 
         # Chat tracking for suspicion meter
         self._chat_log: list[dict] = []
@@ -101,6 +107,9 @@ class GameClient:
         # Last words state
         self._awaiting_last_words = False
         self._last_words_name = ""
+
+        # Spectator state
+        self.is_spectator = False
 
         # Callbacks for message handling (set by the display/UI layer)
         self.on_message_handlers: dict[str, callable] = {}
@@ -175,16 +184,22 @@ class GameClient:
             self._send_raw(create_message(MSG_VOTE, {"target": target_name}))
 
     def send_night_action(self, target: str, action: str = "kill"):
-        """
-        Send a night action (e.g., Mafia kill vote).
-        Supports both name and number-based targeting.
-        """
+        """Send a night action (kill, investigate, protect) for the phase."""
         if self.connected:
-            target_name = self._resolve_target(target, self._night_targets)
-            self._send_raw(create_message(MSG_NIGHT_ACTION, {
+            # Resolve based on action
+            target_list = self._night_targets
+            if action == "investigate":
+                target_list = self._investigate_targets
+            elif action == "protect":
+                target_list = self._protect_targets
+            
+            resolved_target = self._resolve_target(target, target_list)
+            
+            msg = create_message(MSG_NIGHT_ACTION, {
                 "action": action,
-                "target": target_name
-            }))
+                "target": resolved_target
+            })
+            self._send_raw(msg)
 
     def send_last_words(self, message: str):
         """Send last words after being eliminated."""
@@ -297,6 +312,8 @@ class GameClient:
             MSG_PLAYER_LIST: self._on_player_list,
             MSG_LAST_WORDS_BROADCAST: self._on_last_words_broadcast,
             MSG_SUSPICION_DATA: self._on_suspicion_data,
+            MSG_INVESTIGATION_RESULT: self._on_investigation_result,
+            MSG_SPECTATOR_START: self._on_spectator_start,
         }
 
         handler = handler_map.get(msg_type)
@@ -419,8 +436,14 @@ class GameClient:
             self.alive_players = alive_players
 
         if phase == "NIGHT":
-            is_mafia = (self.role == ROLE_MAFIA)
-            show_night_banner(round_num, duration, is_mafia)
+            if self.role == ROLE_MAFIA:
+                show_night_banner(round_num, duration, is_mafia=True)
+            elif self.role == "Detective":
+                show_night_detective(round_num, duration)
+            elif self.role == "Doctor":
+                show_night_doctor(round_num, duration)
+            else:
+                show_night_banner(round_num, duration, is_mafia=False)
 
         elif phase == "DAWN":
             show_dawn_banner(round_num)
@@ -437,8 +460,11 @@ class GameClient:
         """Handle NIGHT_RESULT — display who was killed at night with dramatic art."""
         killed = data.get("killed")
         killed_role = data.get("killed_role", "")
+        saved = data.get("saved", False)
 
-        if killed:
+        if saved:
+            show_doctor_save()
+        elif killed:
             show_night_kill(killed, killed_role)
             # Check if WE were killed
             if killed == self.player_name:
@@ -470,7 +496,7 @@ class GameClient:
             print(f"  {Fore.YELLOW}Type your last words (10 seconds)...{Style.RESET_ALL}")
 
     def _on_game_over(self, data: dict):
-        """Handle GAME_OVER — display winner and full role reveal."""
+        """Handle GAME_OVER — display winner, full role reveal, and match history."""
         winner = data.get("winner", "?")
         reason = data.get("reason", "")
         roles = data.get("roles", {})
@@ -479,9 +505,16 @@ class GameClient:
 
         show_game_over(winner, reason, roles, rounds_played, elimination_log)
 
+        # Show special role history
+        detective_results = data.get("detective_results", [])
+        doctor_saves = data.get("doctor_saves", [])
+        if detective_results or doctor_saves:
+            show_match_history(detective_results, doctor_saves)
+
         self.phase = PHASE_LOBBY
         self.role = None
         self.is_alive = True
+        self.is_spectator = False
         self._chat_log = []
 
     def _on_player_list(self, data: dict):
@@ -494,6 +527,10 @@ class GameClient:
             self._night_targets = players
         elif context == "vote_targets":
             self._vote_targets = players
+        elif context == "investigate_targets":
+            self._investigate_targets = players
+        elif context == "protect_targets":
+            self._protect_targets = players
 
         show_target_list(players, context)
 
@@ -507,6 +544,21 @@ class GameClient:
         """Handle SUSPICION_DATA — display the suspicion meter."""
         mention_counts = data.get("mention_counts", {})
         show_suspicion_meter(mention_counts)
+
+    def _on_investigation_result(self, data: dict):
+        """Handle INVESTIGATION_RESULT — display Detective's finding."""
+        target = data.get("target", "?")
+        result = data.get("result", "?")
+        is_mafia = data.get("is_mafia", False)
+        show_investigation_result(target, result, is_mafia)
+
+    def _on_spectator_start(self, data: dict):
+        """Handle SPECTATOR_START — enter spectator mode with all roles revealed."""
+        self.is_spectator = True
+        self.is_alive = False
+        roles = data.get("roles", {})
+        show_spectator_banner()
+        show_spectator_roles(roles)
 
     # ──────────────────────────────────────────
     # Suspicion Tracking (client-side)
