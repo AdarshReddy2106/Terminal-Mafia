@@ -21,7 +21,8 @@ from common.constants import (
 from common.protocol import (
     create_message, msg_server_announcement,
     MSG_ROLE_ASSIGN, MSG_PHASE_CHANGE, MSG_NIGHT_RESULT,
-    MSG_VOTE_RESULT, MSG_GAME_OVER, MSG_CHAT_MSG, MSG_PLAYER_LIST
+    MSG_VOTE_RESULT, MSG_GAME_OVER, MSG_CHAT_MSG, MSG_PLAYER_LIST,
+    MSG_SUSPICION_DATA
 )
 from server.role_manager import assign_roles, get_role_description, get_team
 from server.state_manager import GameState
@@ -50,6 +51,7 @@ class GameEngine:
         self.phase = PHASE_LOBBY
         self._game_thread = None
         self._phase_event = threading.Event()  # Used to signal early phase completion
+        self._chat_log: list[dict] = []  # Track chat messages for suspicion meter
 
     # ──────────────────────────────────────────
     # Game Start
@@ -274,6 +276,7 @@ class GameEngine:
         self.phase = PHASE_DISCUSSION
         self.server.phase = PHASE_DISCUSSION
         self._phase_event.clear()
+        self._chat_log.clear()
 
         print(f"[Game] 💬 Discussion Phase (Round {round_num}) — {DISCUSSION_PHASE_DURATION}s")
 
@@ -289,6 +292,9 @@ class GameEngine:
 
         # Wait for discussion timer
         self._wait_for_phase(DISCUSSION_PHASE_DURATION)
+
+        # Broadcast suspicion data (name mentions in chat)
+        self._broadcast_suspicion_data()
 
     # ──────────────────────────────────────────
     # Voting Phase
@@ -572,6 +578,10 @@ class GameEngine:
 
         if self.phase == PHASE_DISCUSSION:
             # Normal broadcast chat (handled by server)
+            self._chat_log.append({
+                "from": self.state.get_name(player_id),
+                "message": message
+            })
             return None
 
         if self.phase == PHASE_NIGHT:
@@ -594,3 +604,29 @@ class GameEngine:
             return "No chatting during voting! Cast your vote."
 
         return None
+
+    # ──────────────────────────────────────────
+    # Suspicion Data
+    # ──────────────────────────────────────────
+
+    def _broadcast_suspicion_data(self):
+        """Calculate and broadcast suspicion data based on chat mentions."""
+        from collections import Counter
+        counts = Counter()
+        alive_players = [p["name"] for p in self.state.get_alive_player_list()]
+        
+        for player in alive_players:
+            for entry in self._chat_log:
+                msg = entry.get("message", "").lower()
+                sender = entry.get("from", "")
+                if sender != player and player.lower() in msg:
+                    counts[player] += 1
+                    
+        # Include players with 0 mentions
+        for player in alive_players:
+            if player not in counts:
+                counts[player] = 0
+                
+        self.server.broadcast(create_message(MSG_SUSPICION_DATA, {
+            "mention_counts": dict(counts)
+        }))

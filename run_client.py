@@ -29,29 +29,8 @@ except ImportError:
     class Style:
         BRIGHT = DIM = RESET_ALL = ""
 
-
-TITLE_ART = f"""
-{Fore.RED}{Style.BRIGHT}
-  ╔════════════════════════════════════════════════════════╗
-  ║                                                        ║
-  ║   ████████╗███████╗██████╗ ███╗   ███╗██╗███╗   ██╗   ║
-  ║      ██╔══╝██╔════╝██╔══██╗████╗ ████║██║████╗  ██║   ║
-  ║      ██║   █████╗  ██████╔╝██╔████╔██║██║██╔██╗ ██║   ║
-  ║      ██║   ██╔══╝  ██╔══██╗██║╚██╔╝██║██║██║╚██╗██║   ║
-  ║      ██║   ███████╗██║  ██║██║ ╚═╝ ██║██║██║ ╚████║   ║
-  ║      ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝   ║
-  ║                                                        ║
-  ║{Fore.WHITE}          ███╗   ███╗ █████╗ ███████╗██╗ █████╗         {Fore.RED}║
-  ║{Fore.WHITE}          ████╗ ████║██╔══██╗██╔════╝██║██╔══██╗        {Fore.RED}║
-  ║{Fore.WHITE}          ██╔████╔██║███████║█████╗  ██║███████║        {Fore.RED}║
-  ║{Fore.WHITE}          ██║╚██╔╝██║██╔══██║██╔══╝  ██║██╔══██║        {Fore.RED}║
-  ║{Fore.WHITE}          ██║ ╚═╝ ██║██║  ██║██║     ██║██║  ██║        {Fore.RED}║
-  ║{Fore.WHITE}          ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝        {Fore.RED}║
-  ║                                                        ║
-  ╚════════════════════════════════════════════════════════╝
-{Style.RESET_ALL}
-{Fore.YELLOW}{Style.BRIGHT}  A terminal-based social deduction game{Style.RESET_ALL}
-"""
+from assets.ascii_art import TITLE
+from client.display import clear_screen
 
 
 def main():
@@ -80,7 +59,10 @@ Examples:
     args = parser.parse_args()
 
     # Show title
-    print(TITLE_ART)
+    clear_screen()
+    print(f"{Fore.RED}{Style.BRIGHT}{TITLE}{Style.RESET_ALL}")
+    print(f"  {Fore.YELLOW}{Style.BRIGHT}  A terminal-based social deduction game{Style.RESET_ALL}")
+    print()
 
     # Get player name if not provided via args
     player_name = args.name
@@ -113,12 +95,19 @@ Examples:
     try:
         while client.connected:
             try:
-                user_input = input()
+                prompt = client.get_input_prompt()
+                user_input = input(prompt)
             except EOFError:
                 break
 
             user_input = user_input.strip()
             if not user_input:
+                continue
+
+            # Handle last words mode — any text is sent as last words
+            if client._awaiting_last_words:
+                client.send_last_words(user_input)
+                print(f"  {Style.DIM}Your final words have been spoken.{Style.RESET_ALL}")
                 continue
 
             # Handle client-side commands
@@ -134,20 +123,21 @@ Examples:
                 if target:
                     client.send_vote(target)
                 else:
-                    print(f"  {Fore.RED}Usage: /vote <player_name>{Style.RESET_ALL}")
+                    print(f"  {Fore.RED}Usage: /vote <player_name> or /vote <number>{Style.RESET_ALL}")
 
             elif user_input.lower().startswith("/kill "):
                 target = user_input[6:].strip()
                 if target:
                     client.send_night_action(target)
                 else:
-                    print(f"  {Fore.RED}Usage: /kill <player_name>{Style.RESET_ALL}")
+                    print(f"  {Fore.RED}Usage: /kill <player_name> or /kill <number>{Style.RESET_ALL}")
 
             elif user_input.lower() == "/players":
                 if client.alive_players:
                     print(f"\n  {Style.BRIGHT}Alive players:{Style.RESET_ALL}")
                     for i, name in enumerate(client.alive_players, 1):
-                        print(f"    {i}. {name}")
+                        marker = f"{Fore.YELLOW}★{Style.RESET_ALL}" if name == client.player_name else " "
+                        print(f"    {marker} {i}. {name}")
                     print()
                 elif client.lobby_players:
                     print(f"\n  {Style.BRIGHT}Players in lobby:{Style.RESET_ALL}")
@@ -164,15 +154,25 @@ Examples:
                 else:
                     print(f"  {Style.DIM}No role assigned yet. Game hasn't started.{Style.RESET_ALL}")
 
+            elif user_input.lower() == "/suspicion":
+                # Show local suspicion meter
+                counts = client.get_suspicion_counts()
+                if counts:
+                    from client.display import show_suspicion_meter
+                    show_suspicion_meter(counts)
+                else:
+                    print(f"  {Style.DIM}No chat data yet. Discuss first!{Style.RESET_ALL}")
+
             elif user_input.lower() == "/help":
                 print(f"\n  {Style.BRIGHT}Commands:{Style.RESET_ALL}")
-                print(f"    /start      — Start the game (need min players)")
-                print(f"    /vote <name> — Vote to eliminate a player (day phase)")
-                print(f"    /kill <name> — Choose a night target (Mafia only)")
-                print(f"    /players    — Show alive players")
-                print(f"    /role       — Show your current role")
-                print(f"    /quit       — Leave the game")
-                print(f"    /help       — Show this help")
+                print(f"    /start         — Start the game (need min players)")
+                print(f"    /vote <name/#> — Vote to eliminate (day phase)")
+                print(f"    /kill <name/#> — Choose night target (Mafia only)")
+                print(f"    /players       — Show alive players")
+                print(f"    /role          — Show your current role")
+                print(f"    /suspicion     — Show suspicion meter")
+                print(f"    /quit          — Leave the game")
+                print(f"    /help          — Show this help")
                 print(f"    (anything else) — Send as chat message\n")
 
             elif user_input.startswith("/"):
@@ -187,7 +187,7 @@ Examples:
 
     finally:
         client.disconnect()
-        print(f"  {Style.DIM}Thanks for playing Terminal Mafia!{Style.RESET_ALL}\n")
+        print(f"  {Style.DIM}Thanks for playing Terminal Mafia! 🎭{Style.RESET_ALL}\n")
 
 
 if __name__ == "__main__":

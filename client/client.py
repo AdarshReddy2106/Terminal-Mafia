@@ -6,13 +6,14 @@ Handles:
 - Sending JOIN, CHAT, and other messages
 - Receiving and dispatching server messages in a background thread
 - Heartbeat (PONG) responses to keep connection alive
-- Reconnection-safe disconnect handling
+- Rich terminal UI with ASCII art, colors, and narrative text
 """
 
 import socket
 import threading
 import sys
 import time
+from collections import Counter
 
 from common.constants import (
     BUFFER_SIZE, MESSAGE_DELIMITER, DEFAULT_HOST, DEFAULT_PORT,
@@ -20,13 +21,14 @@ from common.constants import (
     PHASE_VOTING, PHASE_GAME_OVER, ROLE_MAFIA
 )
 from common.protocol import (
-    parse_messages, msg_join, msg_chat, msg_pong,
+    parse_messages, msg_join, msg_chat, msg_pong, msg_last_words,
     create_message,
     MSG_WELCOME, MSG_PLAYER_JOINED, MSG_PLAYER_LEFT, MSG_PLAYER_LIST,
     MSG_LOBBY_STATUS, MSG_CHAT_MSG, MSG_ERROR, MSG_PING,
     MSG_SERVER_MSG, MSG_PHASE_CHANGE, MSG_ROLE_ASSIGN,
     MSG_VOTE_RESULT, MSG_NIGHT_RESULT, MSG_GAME_OVER,
-    MSG_START_GAME, MSG_VOTE, MSG_NIGHT_ACTION
+    MSG_START_GAME, MSG_VOTE, MSG_NIGHT_ACTION,
+    MSG_LAST_WORDS, MSG_LAST_WORDS_BROADCAST, MSG_SUSPICION_DATA
 )
 
 # Try to import colorama for colored output; fall back gracefully
@@ -39,8 +41,20 @@ except ImportError:
     # Stub out color codes
     class Fore:
         RED = GREEN = YELLOW = CYAN = MAGENTA = WHITE = BLUE = RESET = ""
+        LIGHTBLACK_EX = LIGHTRED_EX = LIGHTYELLOW_EX = LIGHTCYAN_EX = ""
+        LIGHTGREEN_EX = LIGHTMAGENTA_EX = LIGHTBLUE_EX = LIGHTWHITE_EX = ""
     class Style:
         BRIGHT = DIM = RESET_ALL = ""
+
+# Import display engine
+from client.display import (
+    clear_screen, terminal_bell, typewriter, glitch_effect,
+    show_night_banner, show_dawn_banner, show_discussion_banner,
+    show_voting_banner, show_role_reveal, show_night_kill,
+    show_no_kill, show_vote_result, show_game_over,
+    show_target_list, show_suspicion_meter, show_last_words,
+    show_lobby, show_countdown_warning, ROLE_COLORS
+)
 
 
 class GameClient:
@@ -75,6 +89,18 @@ class GameClient:
         self.team = None
         self.is_alive = True
         self.alive_players: list[str] = []
+        self.current_round = 0
+
+        # Target lists for number-based voting
+        self._night_targets: list[dict] = []
+        self._vote_targets: list[dict] = []
+
+        # Chat tracking for suspicion meter
+        self._chat_log: list[dict] = []
+
+        # Last words state
+        self._awaiting_last_words = False
+        self._last_words_name = ""
 
         # Callbacks for message handling (set by the display/UI layer)
         self.on_message_handlers: dict[str, callable] = {}
@@ -139,18 +165,62 @@ class GameClient:
         if self.connected:
             self._send_raw(create_message(MSG_START_GAME))
 
-    def send_vote(self, target_name: str):
-        """Send a vote to eliminate a player during day voting."""
+    def send_vote(self, target: str):
+        """
+        Send a vote to eliminate a player during day voting.
+        Supports both name and number-based targeting.
+        """
         if self.connected:
+            target_name = self._resolve_target(target, self._vote_targets)
             self._send_raw(create_message(MSG_VOTE, {"target": target_name}))
 
-    def send_night_action(self, target_name: str, action: str = "kill"):
-        """Send a night action (e.g., Mafia kill vote)."""
+    def send_night_action(self, target: str, action: str = "kill"):
+        """
+        Send a night action (e.g., Mafia kill vote).
+        Supports both name and number-based targeting.
+        """
         if self.connected:
+            target_name = self._resolve_target(target, self._night_targets)
             self._send_raw(create_message(MSG_NIGHT_ACTION, {
                 "action": action,
                 "target": target_name
             }))
+
+    def send_last_words(self, message: str):
+        """Send last words after being eliminated."""
+        if self.connected:
+            self._send_raw(msg_last_words(message))
+            self._awaiting_last_words = False
+
+    def _resolve_target(self, target: str, target_list: list) -> str:
+        """
+        Resolve a target from name or number.
+        
+        If target is a digit, look up from the target list by index.
+        Otherwise, do fuzzy name matching (prefix match).
+        """
+        target = target.strip()
+        
+        # Number-based selection
+        if target.isdigit():
+            idx = int(target) - 1
+            if 0 <= idx < len(target_list):
+                return target_list[idx].get("name", target)
+            else:
+                self._print_error(f"Invalid number. Choose 1-{len(target_list)}.")
+                return target
+        
+        # Fuzzy name matching (case-insensitive prefix)
+        if target_list:
+            lower = target.lower()
+            for p in target_list:
+                name = p.get("name", "")
+                if name.lower() == lower:
+                    return name
+                if name.lower().startswith(lower):
+                    return name
+        
+        return target
 
     def _send_raw(self, message: str) -> bool:
         """Send a raw message string to the server."""
@@ -225,6 +295,8 @@ class GameClient:
             MSG_VOTE_RESULT: self._on_vote_result,
             MSG_GAME_OVER: self._on_game_over,
             MSG_PLAYER_LIST: self._on_player_list,
+            MSG_LAST_WORDS_BROADCAST: self._on_last_words_broadcast,
+            MSG_SUSPICION_DATA: self._on_suspicion_data,
         }
 
         handler = handler_map.get(msg_type)
@@ -274,31 +346,36 @@ class GameClient:
         min_p = data.get("min_players", 4)
         max_p = data.get("max_players", 10)
 
-        print()
-        print(f"  {Style.BRIGHT}📋 LOBBY ({count}/{max_p}){Style.RESET_ALL}")
-        print(f"  {'─' * 30}")
-        for i, name in enumerate(self.lobby_players, 1):
-            marker = f"{Fore.YELLOW}★{Style.RESET_ALL}" if name == self.player_name else " "
-            print(f"  {marker} {i}. {name}")
-        print(f"  {'─' * 30}")
-        if self.lobby_can_start:
-            print(f"  {Fore.GREEN}✅ Ready to start! Type /start to begin.{Style.RESET_ALL}")
-        else:
-            need = min_p - count
-            print(f"  {Fore.YELLOW}⏳ Waiting for {need} more player(s)...{Style.RESET_ALL}")
-        print()
+        show_lobby(
+            players=self.lobby_players,
+            player_name=self.player_name,
+            can_start=self.lobby_can_start,
+            player_count=count,
+            min_players=min_p,
+            max_players=max_p
+        )
 
     def _on_chat_msg(self, data: dict):
         """Handle CHAT_MSG — display a chat message."""
         sender = data.get("from", "???")
         message = data.get("message", "")
 
-        if sender == self.player_name:
+        # Track chat for suspicion meter
+        if self.phase == PHASE_DISCUSSION:
+            self._chat_log.append({"from": sender, "message": message})
+
+        # Color Mafia private chat differently
+        if sender.startswith("[Mafia]"):
+            color = Fore.RED
+            prefix = f"{Fore.RED}{Style.BRIGHT}[🔪 mafia]{Style.RESET_ALL}"
+        elif sender == self.player_name:
             color = Fore.CYAN
+            prefix = f"{Style.DIM}[chat]{Style.RESET_ALL}"
         else:
             color = Fore.WHITE
+            prefix = f"{Style.DIM}[chat]{Style.RESET_ALL}"
 
-        print(f"  {Style.DIM}[chat]{Style.RESET_ALL} {color}{Style.BRIGHT}{sender}{Style.RESET_ALL}: {message}")
+        print(f"  {prefix} {color}{Style.BRIGHT}{sender}{Style.RESET_ALL}: {message}")
 
     def _on_error(self, data: dict):
         """Handle ERROR — display error from server."""
@@ -308,119 +385,89 @@ class GameClient:
     def _on_server_msg(self, data: dict):
         """Handle SERVER_MSG — display a server announcement."""
         message = data.get("message", "")
+        
+        # Check for countdown warnings
+        if message.startswith("⏰"):
+            # Parse seconds if possible for colored countdown
+            for sec in [30, 15, 10, 5]:
+                if f"{sec} seconds" in message:
+                    show_countdown_warning(sec)
+                    return
+        
         self._print_system(message)
 
     def _on_role_assign(self, data: dict):
-        """Handle ROLE_ASSIGN — display the player's secret role."""
+        """Handle ROLE_ASSIGN — display the player's secret role with dramatic reveal."""
         self.role = data.get("role", "Unknown")
         self.team = data.get("team", "Unknown")
         description = data.get("description", "")
         teammates = data.get("teammates", [])
 
-        role_color = Fore.RED if self.role == ROLE_MAFIA else Fore.GREEN
-
-        print()
-        print(f"  {'=' * 50}")
-        print(f"  {Style.BRIGHT}YOUR SECRET ROLE{Style.RESET_ALL}")
-        print(f"  {'=' * 50}")
-        print(f"  Role: {role_color}{Style.BRIGHT}{self.role}{Style.RESET_ALL}")
-        print(f"  Team: {role_color}{self.team}{Style.RESET_ALL}")
-        print(f"  {Style.DIM}{description}{Style.RESET_ALL}")
-        if teammates:
-            print(f"  {Fore.RED}Your Mafia teammates: {', '.join(teammates)}{Style.RESET_ALL}")
-        print(f"  {'=' * 50}")
-        print()
+        clear_screen()
+        show_role_reveal(self.role, self.team, description, teammates)
 
     def _on_phase_change(self, data: dict):
-        """Handle PHASE_CHANGE — display phase transition."""
+        """Handle PHASE_CHANGE — display phase transition with full UI."""
         phase = data.get("phase", "")
         round_num = data.get("round", "?")
-        duration = data.get("duration", "")
+        duration = data.get("duration", 0)
         alive_players = data.get("alive_players", [])
         self.phase = phase
+        self.current_round = round_num
 
         if alive_players:
             self.alive_players = alive_players
 
-        print()
         if phase == "NIGHT":
-            print(f"  {Fore.BLUE}{Style.BRIGHT}{'=' * 50}")
-            print(f"  \U0001f319  NIGHT PHASE  \u2014  Round {round_num}")
-            print(f"  {'=' * 50}{Style.RESET_ALL}")
-            if duration:
-                print(f"  {Style.DIM}Duration: {duration} seconds{Style.RESET_ALL}")
-            if self.role == ROLE_MAFIA:
-                print(f"  {Fore.RED}{Style.BRIGHT}Choose your target! Use: /kill <name>{Style.RESET_ALL}")
-            else:
-                print(f"  {Style.DIM}The town sleeps... wait for dawn.{Style.RESET_ALL}")
+            is_mafia = (self.role == ROLE_MAFIA)
+            show_night_banner(round_num, duration, is_mafia)
 
         elif phase == "DAWN":
-            print(f"  {Fore.YELLOW}{Style.BRIGHT}{'=' * 50}")
-            print(f"  \U0001f305  DAWN  \u2014  Round {round_num}")
-            print(f"  {'=' * 50}{Style.RESET_ALL}")
+            show_dawn_banner(round_num)
 
         elif phase == "DISCUSSION":
-            print(f"  {Fore.CYAN}{Style.BRIGHT}{'=' * 50}")
-            print(f"  \U0001f4ac  DISCUSSION PHASE  \u2014  Round {round_num}")
-            print(f"  {'=' * 50}{Style.RESET_ALL}")
-            if duration:
-                print(f"  {Style.DIM}Duration: {duration} seconds{Style.RESET_ALL}")
-            if alive_players:
-                print(f"  {Style.DIM}Alive: {', '.join(alive_players)}{Style.RESET_ALL}")
-            print(f"  {Fore.CYAN}Discuss! Who do you think is Mafia?{Style.RESET_ALL}")
+            # Reset chat log for new discussion
+            self._chat_log = []
+            show_discussion_banner(round_num, duration, alive_players)
 
         elif phase == "VOTING":
-            print(f"  {Fore.YELLOW}{Style.BRIGHT}{'=' * 50}")
-            print(f"  \U0001f5f3\ufe0f  VOTING PHASE  \u2014  Round {round_num}")
-            print(f"  {'=' * 50}{Style.RESET_ALL}")
-            if duration:
-                print(f"  {Style.DIM}Duration: {duration} seconds{Style.RESET_ALL}")
-            if alive_players:
-                print(f"  {Style.DIM}Alive: {', '.join(alive_players)}{Style.RESET_ALL}")
-            print(f"  {Fore.YELLOW}Vote to eliminate! Use: /vote <name>{Style.RESET_ALL}")
-        print()
+            show_voting_banner(round_num, duration, alive_players)
 
     def _on_night_result(self, data: dict):
-        """Handle NIGHT_RESULT — display who was killed at night."""
-        message = data.get("message", "")
+        """Handle NIGHT_RESULT — display who was killed at night with dramatic art."""
         killed = data.get("killed")
+        killed_role = data.get("killed_role", "")
 
-        print()
         if killed:
-            print(f"  {Fore.RED}{Style.BRIGHT}{message}{Style.RESET_ALL}")
+            show_night_kill(killed, killed_role)
+            # Check if WE were killed
+            if killed == self.player_name:
+                self.is_alive = False
+                print(f"  {Fore.RED}{Style.BRIGHT}💀 YOU HAVE BEEN ELIMINATED!{Style.RESET_ALL}")
+                self._awaiting_last_words = True
+                self._last_words_name = self.player_name
+                print(f"  {Fore.YELLOW}Type your last words (10 seconds)...{Style.RESET_ALL}")
         else:
-            print(f"  {Fore.GREEN}{Style.BRIGHT}{message}{Style.RESET_ALL}")
-        print()
+            show_no_kill()
 
     def _on_vote_result(self, data: dict):
-        """Handle VOTE_RESULT — display voting outcome."""
-        message = data.get("message", "")
+        """Handle VOTE_RESULT — display voting outcome with visuals."""
         eliminated = data.get("eliminated")
+        eliminated_role = data.get("eliminated_role", "")
         vote_tally = data.get("vote_tally", {})
         individual_votes = data.get("individual_votes", {})
         is_tie = data.get("is_tie", False)
 
-        print()
-        print(f"  {'\u2500' * 40}")
-        if eliminated:
-            print(f"  {Fore.RED}{Style.BRIGHT}{message}{Style.RESET_ALL}")
-        elif is_tie:
-            print(f"  {Fore.YELLOW}{Style.BRIGHT}{message}{Style.RESET_ALL}")
-        else:
-            print(f"  {Style.DIM}{message}{Style.RESET_ALL}")
+        show_vote_result(eliminated, eliminated_role,
+                        vote_tally, individual_votes, is_tie)
 
-        # Show vote breakdown
-        if vote_tally:
-            print(f"  {Style.DIM}Vote tally:{Style.RESET_ALL}")
-            for target, count in sorted(vote_tally.items(), key=lambda x: -x[1]):
-                bar = '\u2588' * count
-                print(f"    {target}: {bar} ({count})")
-        if individual_votes:
-            print(f"  {Style.DIM}Individual votes:{Style.RESET_ALL}")
-            for voter, target in individual_votes.items():
-                print(f"    {voter} \u2192 {target}")
-        print(f"  {'\u2500' * 40}")
-        print()
+        # Check if WE were eliminated
+        if eliminated == self.player_name:
+            self.is_alive = False
+            print(f"  {Fore.RED}{Style.BRIGHT}💀 YOU HAVE BEEN ELIMINATED!{Style.RESET_ALL}")
+            self._awaiting_last_words = True
+            self._last_words_name = self.player_name
+            print(f"  {Fore.YELLOW}Type your last words (10 seconds)...{Style.RESET_ALL}")
 
     def _on_game_over(self, data: dict):
         """Handle GAME_OVER — display winner and full role reveal."""
@@ -430,57 +477,89 @@ class GameClient:
         rounds_played = data.get("rounds_played", 0)
         elimination_log = data.get("elimination_log", [])
 
-        winner_color = Fore.GREEN if winner == "Town" else Fore.RED
-
-        print()
-        print(f"  {Style.BRIGHT}{'\u2550' * 50}{Style.RESET_ALL}")
-        print(f"  {Style.BRIGHT}\U0001f3c6  GAME OVER  \U0001f3c6{Style.RESET_ALL}")
-        print(f"  {Style.BRIGHT}{'\u2550' * 50}{Style.RESET_ALL}")
-        print(f"  Winner: {winner_color}{Style.BRIGHT}{winner}{Style.RESET_ALL}")
-        print(f"  {reason}")
-        print(f"  Rounds played: {rounds_played}")
-        print()
-
-        # Role reveal
-        print(f"  {Style.BRIGHT}All Roles:{Style.RESET_ALL}")
-        print(f"  {'\u2500' * 40}")
-        for name, info in roles.items():
-            role = info.get('role', '?')
-            survived = info.get('survived', False)
-            role_color = Fore.RED if role == ROLE_MAFIA else Fore.GREEN
-            status = f"{Fore.GREEN}survived{Style.RESET_ALL}" if survived else f"{Fore.RED}eliminated{Style.RESET_ALL}"
-            print(f"    {name}: {role_color}{role}{Style.RESET_ALL} ({status})")
-        print(f"  {'\u2500' * 40}")
-
-        # Elimination timeline
-        if elimination_log:
-            print(f"\n  {Style.BRIGHT}Elimination Timeline:{Style.RESET_ALL}")
-            for entry in elimination_log:
-                phase_icon = "\U0001f319" if entry.get('phase') == 'night' else "\u2600\ufe0f"
-                print(f"    {phase_icon} Round {entry.get('round', '?')}: "
-                      f"{entry.get('eliminated', '?')} ({entry.get('role', '?')})")
-        print()
+        show_game_over(winner, reason, roles, rounds_played, elimination_log)
 
         self.phase = PHASE_LOBBY
         self.role = None
         self.is_alive = True
+        self._chat_log = []
 
     def _on_player_list(self, data: dict):
-        """Handle PLAYER_LIST — display target list for voting/night actions."""
+        """Handle PLAYER_LIST — display target list with numbers for easy voting."""
         players = data.get("players", [])
         context = data.get("context", "")
 
+        # Store targets for number-based selection
         if context == "night_targets":
-            print(f"  {Fore.RED}{Style.BRIGHT}Choose your target:{Style.RESET_ALL}")
-            for i, p in enumerate(players, 1):
-                print(f"    {i}. {p.get('name', '?')}")
-            print(f"  {Style.DIM}Use: /kill <name>{Style.RESET_ALL}")
+            self._night_targets = players
         elif context == "vote_targets":
-            print(f"  {Fore.YELLOW}{Style.BRIGHT}Vote to eliminate:{Style.RESET_ALL}")
-            for i, p in enumerate(players, 1):
-                print(f"    {i}. {p.get('name', '?')}")
-            print(f"  {Style.DIM}Use: /vote <name>{Style.RESET_ALL}")
-        print()
+            self._vote_targets = players
+
+        show_target_list(players, context)
+
+    def _on_last_words_broadcast(self, data: dict):
+        """Handle LAST_WORDS_BROADCAST — display a dead player's last words."""
+        name = data.get("player_name", "???")
+        message = data.get("message", "")
+        show_last_words(name, message)
+
+    def _on_suspicion_data(self, data: dict):
+        """Handle SUSPICION_DATA — display the suspicion meter."""
+        mention_counts = data.get("mention_counts", {})
+        show_suspicion_meter(mention_counts)
+
+    # ──────────────────────────────────────────
+    # Suspicion Tracking (client-side)
+    # ──────────────────────────────────────────
+
+    def get_suspicion_counts(self) -> dict:
+        """
+        Count name mentions in chat log for local suspicion meter.
+        Returns dict of player_name -> mention_count.
+        """
+        counts = Counter()
+        for player in self.alive_players:
+            if player == self.player_name:
+                continue  # Don't count self-mentions
+            for entry in self._chat_log:
+                msg = entry.get("message", "").lower()
+                sender = entry.get("from", "")
+                # Don't count the player mentioning their own name
+                if sender != player and player.lower() in msg:
+                    counts[player] += 1
+        
+        # Include players with 0 mentions
+        for player in self.alive_players:
+            if player != self.player_name and player not in counts:
+                counts[player] = 0
+        
+        return dict(counts)
+
+    # ──────────────────────────────────────────
+    # Context-Aware Input Prompt
+    # ──────────────────────────────────────────
+
+    def get_input_prompt(self) -> str:
+        """Get the appropriate input prompt based on current game state."""
+        if self._awaiting_last_words:
+            return f"  {Fore.RED}💀 Last words > {Style.RESET_ALL}"
+        
+        if not self.is_alive:
+            return f"  {Style.DIM}👻 (spectating) > {Style.RESET_ALL}"
+        
+        if self.phase == PHASE_LOBBY:
+            return f"  {Fore.GREEN}🎭 > {Style.RESET_ALL}"
+        elif self.phase == PHASE_NIGHT:
+            if self.role == ROLE_MAFIA:
+                return f"  {Fore.RED}🔪 > {Style.RESET_ALL}"
+            else:
+                return f"  {Style.DIM}💤 > {Style.RESET_ALL}"
+        elif self.phase == PHASE_DISCUSSION:
+            return f"  {Fore.CYAN}💬 > {Style.RESET_ALL}"
+        elif self.phase == PHASE_VOTING:
+            return f"  {Fore.YELLOW}🗳️  > {Style.RESET_ALL}"
+        
+        return f"  > "
 
     # ──────────────────────────────────────────
     # Output Helpers

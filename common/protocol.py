@@ -23,6 +23,7 @@ MSG_VOTE = "VOTE"                  # Player votes to eliminate someone
 MSG_NIGHT_ACTION = "NIGHT_ACTION"  # Player performs a night action (Mafia kill, Detective investigate, etc.)
 MSG_START_GAME = "START_GAME"      # Host requests to start the game
 MSG_PONG = "PONG"                  # Response to server ping (heartbeat)
+MSG_LAST_WORDS = "LAST_WORDS"      # Eliminated player sends their last message
 
 # --- Server → Client ---
 MSG_WELCOME = "WELCOME"            # Server acknowledges join, sends player id
@@ -39,6 +40,8 @@ MSG_PLAYER_JOINED = "PLAYER_JOINED"    # Notify lobby that a new player joined
 MSG_PLAYER_LEFT = "PLAYER_LEFT"        # Notify lobby that a player disconnected
 MSG_LOBBY_STATUS = "LOBBY_STATUS"      # Current lobby state (player count, waiting status)
 MSG_SERVER_MSG = "SERVER_MSG"          # Generic server announcement
+MSG_LAST_WORDS_BROADCAST = "LAST_WORDS_BROADCAST"  # Broadcast eliminated player's last words
+MSG_SUSPICION_DATA = "SUSPICION_DATA"              # Chat mention counts for suspicion meter
 
 
 # ══════════════════════════════════════════════
@@ -164,6 +167,13 @@ def msg_ping() -> str:
 def msg_pong() -> str:
     """Client heartbeat response."""
     return create_message(MSG_PONG)
+
+
+def msg_last_words(message: str) -> str:
+    """Client sends their last words after being eliminated."""
+    return create_message(MSG_LAST_WORDS, {
+        "message": message
+    })
 
 
 # ══════════════════════════════════════════════

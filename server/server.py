@@ -22,8 +22,8 @@ from common.protocol import (
     parse_messages, msg_welcome, msg_player_joined, msg_player_left,
     msg_lobby_status, msg_error, msg_server_announcement, msg_ping,
     MSG_JOIN, MSG_CHAT, MSG_PONG, MSG_START_GAME,
-    MSG_VOTE, MSG_NIGHT_ACTION,
-    create_message, MSG_CHAT_MSG
+    MSG_VOTE, MSG_NIGHT_ACTION, MSG_LAST_WORDS,
+    create_message, MSG_CHAT_MSG, MSG_LAST_WORDS_BROADCAST
 )
 from common.utils import generate_player_id, sanitize_name, get_local_ip
 
@@ -294,6 +294,8 @@ class GameServer:
             self._handle_vote(player, data)
         elif msg_type == MSG_NIGHT_ACTION:
             self._handle_night_action(player, data)
+        elif msg_type == MSG_LAST_WORDS:
+            self._handle_last_words(player, data)
         else:
             # Unknown or not-yet-implemented message type
             player.send(msg_error(f"Unknown message type: {msg_type}"))
@@ -402,6 +404,34 @@ class GameServer:
         error = self.game_engine.handle_night_action(player.player_id, data)
         if error:
             player.send(msg_error(error))
+
+    def _handle_last_words(self, player: PlayerConnection, data: dict):
+        """
+        Handle a LAST_WORDS message from an eliminated player.
+        Broadcasts their final message to all players.
+        """
+        if not player.joined:
+            return
+
+        message = data.get("message", "").strip()
+        if not message:
+            return
+
+        # Only allow if player is actually dead in the game
+        if self.game_engine and self.game_engine.state:
+            if self.game_engine.state.is_alive(player.player_id):
+                player.send(msg_error("You are still alive! No last words needed."))
+                return
+
+        # Truncate long messages
+        message = message[:200]
+
+        print(f"[Server] 💀 Last words from {player.name}: {message}")
+
+        self.broadcast(create_message(MSG_LAST_WORDS_BROADCAST, {
+            "player_name": player.name,
+            "message": message
+        }))
 
     # ──────────────────────────────────────────
     # Broadcasting
