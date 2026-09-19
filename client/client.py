@@ -251,10 +251,10 @@ class GameClient:
         """Handle PLAYER_JOINED — another player entered the lobby."""
         name = data.get("player_name", "???")
         count = data.get("player_count", "?")
-        min_p = data.get("min_players", "?")
+        plural = "player" if count == 1 else "players"
         self._print_system(
             f"{Fore.GREEN}➕ {name}{Style.RESET_ALL} joined the lobby "
-            f"({count}/{min_p} players)"
+            f"({count} {plural} joined)"
         )
 
     def _on_player_left(self, data: dict):

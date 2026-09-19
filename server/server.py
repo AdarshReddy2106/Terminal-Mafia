@@ -89,7 +89,7 @@ class GameServer:
 
         # Connected players: player_id -> PlayerConnection
         self.players: dict[str, PlayerConnection] = {}
-        self.players_lock = threading.Lock()
+        self.players_lock = threading.RLock()
 
         # Game state
         self.phase = PHASE_LOBBY
@@ -233,31 +233,39 @@ class GameServer:
         """Handle a player disconnecting from the server."""
         player.close()
 
+        joined = False
+        name = ""
+        player_count = 0
+
         with self.players_lock:
             if player.player_id in self.players:
                 del self.players[player.player_id]
+                joined = player.joined
+                name = player.name
+                player_count = len(self.players)
+            else:
+                return
 
-                if player.joined and player.name:
-                    player_count = len(self.players)
-                    print(f"[Server] 💔 {player.name} disconnected. ({player_count} players remaining)")
+        if joined and name:
+            print(f"[Server] 💔 {name} disconnected. ({player_count} players remaining)")
 
-                    # Notify remaining players
-                    self.broadcast(msg_player_left(player.name, player_count))
+            # Notify remaining players
+            self.broadcast(msg_player_left(name, player_count))
 
-                    if self.phase == PHASE_LOBBY:
-                        # Send updated lobby status
-                        self._broadcast_lobby_status()
-                    elif self.phase != PHASE_GAME_OVER and self.game_engine:
-                        # Mid-game disconnect: mark player dead and check win
-                        self.game_engine.state.handle_player_disconnect(player.player_id)
-                        self.broadcast(msg_server_announcement(
-                            f"💔 {player.name} has disconnected and is out of the game."
-                        ))
-                        win = self.game_engine.state.check_win_condition()
-                        if win:
-                            self.game_engine._end_game()
-                else:
-                    print(f"[Server] Connection from {player.addr[0]} dropped (never joined).")
+            if self.phase == PHASE_LOBBY:
+                # Send updated lobby status
+                self._broadcast_lobby_status()
+            elif self.phase != PHASE_GAME_OVER and self.game_engine:
+                # Mid-game disconnect: mark player dead and check win
+                self.game_engine.state.handle_player_disconnect(player.player_id)
+                self.broadcast(msg_server_announcement(
+                    f"💔 {name} has disconnected and is out of the game."
+                ))
+                win = self.game_engine.state.check_win_condition()
+                if win:
+                    self.game_engine._end_game()
+        else:
+            print(f"[Server] Connection from {player.addr[0]} dropped (never joined).")
 
     # ──────────────────────────────────────────
     # Message Handling
