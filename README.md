@@ -17,10 +17,49 @@ Terminal Mafia is a local-hosted, terminal-exclusive multiplayer game built for 
 - **🎯 Special Roles**: Play as a humble Villager, the deceiving Mafia, the investigating Detective, or the protecting Doctor.
 - **🎨 Immersive Terminal UI**: Experience the game entirely through your command line, complete with dynamic ASCII art, colored text themes, and dramatic typewriter animations.
 - **🕒 Timed Game Loop**: Navigate through the structured phases of Night (Secret Actions), Dawn (Reveals), Discussion (Timed Chat), and Voting.
-- **📊 Suspicion Meter**: The terminal actively visualizes chat frequency, creating a heat map to see who is talking too much—or too little!
-- **👻 Spectator Mode**: Death is not the end. Eliminated players can spectate the game, see everyone's true roles, and secretly read the private Mafia chat.
+- **📋 Task System**: Villagers and spectators receive tasks each Night. Complete them to push the Town closer to victory — finish all tasks and the Town wins outright! A live **task bar** tracks overall completion in real time.
+- **👻 Spectator Mode**: Death is not the end. Eliminated players can still spectate the game, see everyone's true roles, read the private Mafia chat, **and continue completing their assigned tasks** to help the Town win.
 - **📖 End-Game Match History**: At the end of every match, the game prints a full chronological timeline of Detective investigations, Doctor saves, and who voted for whom.
 - **🔌 Unified Executable**: No complicated setup. A single `.exe` file gives you an interactive menu to either host a server or join a game.
+
+---
+
+## 📋 How the Task System Works
+
+Tasks are a core mechanic that gives Villagers (and spectators) a second path to victory beyond voting out the Mafia.
+
+| Detail | Description |
+|---|---|
+| **When are tasks assigned?** | Fresh tasks are allocated to each player at the start of every **Night** phase. |
+| **Who can do tasks?** | All **Villagers** and **Spectators** (eliminated players) can complete their assigned tasks. |
+| **What happens when I complete a task?** | The task is ~~struck through~~ in your list, and the global **task bar** updates to reflect the Town's overall progress. |
+| **What if I don't finish a task?** | Incomplete tasks are **not** carried over. They are replaced with **brand-new tasks** in the next round, keeping the gameplay fresh and engaging every single round. |
+| **How does the Town win via tasks?** | If **all allocated tasks across all players are completed**, the **Town wins immediately** — no vote required! |
+
+> **💡 Tip:** Even as a spectator, your contributions matter! Keep completing tasks after elimination to give your team the edge.
+
+---
+
+## 🌙 Night Phase Mechanics
+
+The Night phase is when secret actions take place. Here's what each role can do:
+
+| Role | Night Action |
+|---|---|
+| **🔪 Mafia** | Choose a target to assassinate — but beware of the **15-second kill cooldown**. After the Night begins, the Mafia must wait 15 seconds before they can issue a `/kill` command. |
+| **🔍 Detective** | Investigate a player to learn their true allegiance (Town or Mafia). |
+| **🛡️ Doctor** | Shield a player to protect them from being killed that night. |
+| **🏘️ Villagers** | Complete your assigned tasks to push the task bar toward a Town victory. |
+| **👻 Spectators** | Continue completing tasks — you can still help the Town win from beyond the grave! |
+
+---
+
+## 🏆 Win Conditions
+
+| Team | How They Win |
+|---|---|
+| **🏘️ Town** | Vote out all Mafia members **OR** complete all allocated tasks across every round. |
+| **🔪 Mafia** | Outnumber the remaining Villagers so they can no longer be voted out. |
 
 ---
 
@@ -52,14 +91,15 @@ Once enough players have joined (Minimum: 4), anyone can type `/start` in the ch
 
 During the game, typing anything in the console acts as a normal chat message. However, there are special commands you can use depending on the phase:
 
-- `/vote <number>` — Cast your vote to eliminate someone during the Day phase.
-- `/kill <number>` — (Mafia Only) Choose a target to assassinate during the Night.
-- `/investigate <number>` — (Detective Only) Learn a player's true allegiance during the Night.
-- `/protect <number>` — (Doctor Only) Protect a player from death during the Night.
-- `/players` — Check who is currently alive.
-- `/role` — View your assigned role and team.
-- `/suspicion` — View the suspicion meter heat map.
-- `/help` — List all available commands.
+| Command | Description |
+|---|---|
+| `/vote <number>` | Cast your vote to eliminate someone during the Day phase. |
+| `/kill <number>` | *(Mafia Only)* Choose a target to assassinate during the Night (15s cooldown applies). |
+| `/investigate <number>` | *(Detective Only)* Learn a player's true allegiance during the Night. |
+| `/protect <number>` | *(Doctor Only)* Shield a player from death during the Night. |
+| `/players` | Check who is currently alive. |
+| `/role` | View your assigned role and team. |
+| `/help` | List all available commands. |
 
 ---
 
@@ -72,4 +112,5 @@ Check out the [Technical Architecture Guide](TECHNICAL_ARCHITECTURE.md) for a de
 ---
 
 <div align="center">
+  <i>Built with ❤️ for the IAC Hackathon</i>
 </div>
