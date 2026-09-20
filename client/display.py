@@ -90,12 +90,12 @@ def terminal_bell():
 # Text Effects
 # ══════════════════════════════════════════════
 
-def typewriter(text: str, delay: float = 0.012, color: str = ""):
+def typewriter(text: str, delay: float = 0.024, color: str = ""):
     """
     Print text with a fast typewriter effect.
     
     Smooth and quick — adds drama without making players wait.
-    delay=0.012 gives ~80 chars/second, which feels snappy.
+    delay=0.024 gives ~40 chars/second, which feels snappy.
     """
     reset = Style.RESET_ALL
     for char in text:
