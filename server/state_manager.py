@@ -192,6 +192,11 @@ class GameState:
             self.detective_target.clear()
             self.doctor_target.clear()
 
+    def clear_doctor_target(self):
+        """Reset the doctor's protection target."""
+        with self.lock:
+            self.doctor_target.clear()
+
     def add_mafia_vote(self, voter_id: str, target_id: str) -> bool:
         """
         Record a Mafia member's kill vote.

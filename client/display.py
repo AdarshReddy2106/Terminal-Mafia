@@ -402,6 +402,22 @@ def show_target_list(players: list, context: str):
         print(f"  {Fore.YELLOW}{Style.BRIGHT}└──────────────────────────┘{Style.RESET_ALL}")
         print(f"  {Style.DIM}Use: /vote <name> or /vote <number>{Style.RESET_ALL}")
     
+    elif context == "investigate_targets":
+        print(f"  {Fore.CYAN}{Style.BRIGHT}┌─── INVESTIGATE TARGET ───┐{Style.RESET_ALL}")
+        for i, p in enumerate(players, 1):
+            name = p.get("name", "?")
+            print(f"  {Fore.CYAN}│  {Style.BRIGHT}{i}.{Style.RESET_ALL} {Fore.CYAN}{name}{Style.RESET_ALL}")
+        print(f"  {Fore.CYAN}{Style.BRIGHT}└──────────────────────────┘{Style.RESET_ALL}")
+        print(f"  {Style.DIM}Use: /investigate <name> or /investigate <number>{Style.RESET_ALL}")
+    
+    elif context == "protect_targets":
+        print(f"  {Fore.LIGHTGREEN_EX}{Style.BRIGHT}┌───── PROTECT TARGET ─────┐{Style.RESET_ALL}")
+        for i, p in enumerate(players, 1):
+            name = p.get("name", "?")
+            print(f"  {Fore.LIGHTGREEN_EX}│  {Style.BRIGHT}{i}.{Style.RESET_ALL} {Fore.LIGHTGREEN_EX}{name}{Style.RESET_ALL}")
+        print(f"  {Fore.LIGHTGREEN_EX}{Style.BRIGHT}└──────────────────────────┘{Style.RESET_ALL}")
+        print(f"  {Style.DIM}Use: /protect <name> or /protect <number>{Style.RESET_ALL}")
+    
     print()
 
 
