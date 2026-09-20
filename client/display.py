@@ -626,6 +626,35 @@ def show_night_detective(round_num: int, duration: int = 0):
 
 
 # ══════════════════════════════════════════════
+# Night Banner — Doctor
+# ══════════════════════════════════════════════
+
+def show_night_doctor(round_num: int, duration: int = 0):
+    """Night banner for the Doctor."""
+    clear_screen()
+    terminal_bell()
+    
+    print(f"{Fore.BLUE}{Style.BRIGHT}{NIGHT_BANNER}{Style.RESET_ALL}")
+    print(f"  {Fore.BLUE}{Style.BRIGHT}Round {round_num}{Style.RESET_ALL}")
+    
+    if duration:
+        print(f"  {Style.DIM}Time limit: {duration} seconds{Style.RESET_ALL}")
+    
+    print()
+    typewriter(f"  {narrate_night_fall()}", delay=0.015, color=Fore.BLUE)
+    print()
+    
+    print(f"  {Fore.LIGHTGREEN_EX}{Style.BRIGHT}╔═══════════════════════════════════╗{Style.RESET_ALL}")
+    print(f"  {Fore.LIGHTGREEN_EX}{Style.BRIGHT}║  💉 You are the DOCTOR.          ║{Style.RESET_ALL}")
+    print(f"  {Fore.LIGHTGREEN_EX}{Style.BRIGHT}║     Choose a player to            ║{Style.RESET_ALL}")
+    print(f"  {Fore.LIGHTGREEN_EX}{Style.BRIGHT}║     protect. Use:                 ║{Style.RESET_ALL}")
+    print(f"  {Fore.LIGHTGREEN_EX}{Style.BRIGHT}║     /protect <name> or <#>        ║{Style.RESET_ALL}")
+    print(f"  {Fore.LIGHTGREEN_EX}{Style.BRIGHT}╚═══════════════════════════════════╝{Style.RESET_ALL}")
+    
+    print(f"\n{Fore.BLUE}{DIVIDER_NIGHT}{Style.RESET_ALL}\n")
+
+
+# ══════════════════════════════════════════════
 # Task Display
 # ══════════════════════════════════════════════
 

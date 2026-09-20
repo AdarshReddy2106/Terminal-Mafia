@@ -58,7 +58,7 @@ from client.display import (
     show_lobby, show_countdown_warning, ROLE_COLORS,
     show_investigation_result, show_doctor_save,
     show_spectator_banner, show_spectator_roles,
-    show_night_detective, show_match_history,
+    show_night_detective, show_night_doctor, show_match_history,
     show_task_list, show_task_progress, show_task_result
 )
 
@@ -453,6 +453,8 @@ class GameClient:
                 show_night_banner(round_num, duration, is_mafia=True)
             elif self.role == "Detective":
                 show_night_detective(round_num, duration)
+            elif self.role == "Doctor":
+                show_night_doctor(round_num, duration)
             else:
                 show_night_banner(round_num, duration, is_mafia=False)
 
@@ -637,6 +639,10 @@ class GameClient:
         elif self.phase == PHASE_NIGHT:
             if self.role == ROLE_MAFIA:
                 return f"  {Fore.RED}🔪 > {Style.RESET_ALL}"
+            elif self.role == "Doctor":
+                return f"  {Fore.LIGHTGREEN_EX}💉 > {Style.RESET_ALL}"
+            elif self.role == "Detective":
+                return f"  {Fore.CYAN}🔍 > {Style.RESET_ALL}"
             else:
                 return f"  {Style.DIM}💤 > {Style.RESET_ALL}"
         elif self.phase == PHASE_DISCUSSION:

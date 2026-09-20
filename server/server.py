@@ -439,12 +439,7 @@ class GameServer:
             return
 
         action = data.get("action", "")
-
-        # Route /protect to handle_doctor_protect (works during Discussion)
-        if action == "protect":
-            error = self.game_engine.handle_doctor_protect(player.player_id, data)
-        else:
-            error = self.game_engine.handle_night_action(player.player_id, data)
+        error = self.game_engine.handle_night_action(player.player_id, data)
 
         if error:
             player.send(msg_error(error))

@@ -119,9 +119,9 @@ def get_role_description(role: str) -> str:
             "Don't forget to complete your tasks too!"
         ),
         ROLE_DOCTOR: (
-            "You are the Doctor. During the Discussion phase, privately choose one "
-            "player to protect from the Mafia's kill tonight. Use /protect <name> "
-            "during Discussion. Complete your tasks at night!"
+            "You are the Doctor. Each night, privately choose one "
+            "player to protect from the Mafia's kill. Use /protect <name> "
+            "during the night. Complete your tasks too!"
         ),
         ROLE_ENGINEER: (
             "You are the Engineer. Complete your 3 tasks at night, then you get "
@@ -134,4 +134,4 @@ def get_role_description(role: str) -> str:
 
 def has_night_action(role: str) -> bool:
     """Check if a role has a special night action to perform (beyond tasks)."""
-    return role in (ROLE_MAFIA, ROLE_DETECTIVE)
+    return role in (ROLE_MAFIA, ROLE_DETECTIVE, ROLE_DOCTOR)

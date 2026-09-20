@@ -283,7 +283,13 @@ class GameEngine:
                 "context": "investigate_targets"
             }))
 
-        # Doctor no longer acts at Night — protection was chosen during Discussion
+        # ── Send protect targets to Doctor (if alive) ──
+        doctor_id = self.state.get_alive_doctor()
+        if doctor_id:
+            self.server.send_to_player(doctor_id, create_message(MSG_PLAYER_LIST, {
+                "players": alive_list,
+                "context": "protect_targets"
+            }))
 
         # Wait for night duration or until all night-role players have acted
         self._wait_for_phase(NIGHT_PHASE_DURATION, self._all_night_actions_done)
@@ -386,7 +392,11 @@ class GameEngine:
                     if pid not in self.state.detective_target:
                         return False
 
-            # Doctor no longer acts at night — skip check
+            # Check Doctor
+            for pid, role in self.state.roles.items():
+                if role == ROLE_DOCTOR and self.state.alive.get(pid, False):
+                    if pid not in self.state.doctor_target:
+                        return False
 
             return True
 
@@ -422,17 +432,6 @@ class GameEngine:
             "duration": DISCUSSION_PHASE_DURATION,
             "alive_players": [p["name"] for p in alive_list]
         }))
-
-        # Send protect targets to Doctor (if alive)
-        doctor_id = self.state.get_alive_doctor()
-        if doctor_id:
-            self.server.send_to_player(doctor_id, create_message(MSG_PLAYER_LIST, {
-                "players": alive_list,
-                "context": "protect_targets"
-            }))
-            self.server.send_to_player(doctor_id, msg_server_announcement(
-                "🩺 Doctor: Use /protect <name> now to choose who to protect tonight."
-            ))
 
         # Wait for discussion timer
         self._wait_for_phase(DISCUSSION_PHASE_DURATION)
@@ -738,45 +737,19 @@ class GameEngine:
             print(f"[Game] 🔍 {voter_name} (Detective) investigating {target_name}")
             return None  # Success
 
-        # ── Doctor Protect (now during Discussion phase — but handle if sent at night) ──
+        # ── Doctor Protect ──
         if role == ROLE_DOCTOR and action in ("protect", ""):
-            return "As the Doctor, use /protect during the Discussion phase, not at Night!"
+            if not self.state.add_doctor_action(player_id, target_id):
+                return "Invalid protection target."
+
+            voter_name = self.state.get_name(player_id)
+            print(f"[Game] 💉 {voter_name} (Doctor) protecting {target_name}")
+            self.server.send_to_player(player_id, msg_server_announcement(
+                f"🛡️ You will protect {target_name} tonight."
+            ))
+            return None  # Success
 
         return f"You can't perform that action as {role}."
-
-    def handle_doctor_protect(self, player_id: str, data: dict) -> str | None:
-        """
-        Process Doctor's protection choice during Discussion phase.
-        
-        Returns error message string if invalid, else None.
-        """
-        if self.phase != PHASE_DISCUSSION:
-            return "You can only use /protect during the Discussion phase!"
-
-        role = self.state.get_role(player_id)
-        if role != ROLE_DOCTOR:
-            return "Only the Doctor can use /protect!"
-
-        target_name = data.get("target", "")
-        if not target_name:
-            return "You must specify who to protect."
-
-        target_id = self.state.get_player_id_by_name(target_name)
-        if not target_id:
-            return f"Player '{target_name}' not found."
-
-        if not self.state.is_alive(target_id):
-            return f"{target_name} is already dead."
-
-        if not self.state.add_doctor_action(player_id, target_id):
-            return "Invalid protection target."
-
-        voter_name = self.state.get_name(player_id)
-        print(f"[Game] 💉 {voter_name} (Doctor) protecting {target_name}")
-        self.server.send_to_player(player_id, msg_server_announcement(
-            f"🛡️ You will protect {target_name} tonight."
-        ))
-        return None
 
     def handle_task_submit(self, player_id: str, data: dict) -> str | None:
         """
