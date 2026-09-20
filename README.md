@@ -5,7 +5,6 @@
 **A multiplayer, terminal-based social deduction game of deception, trust, and survival.**
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 </div>
 
@@ -22,23 +21,6 @@ Terminal Mafia is a local-hosted, terminal-exclusive multiplayer game built for 
 - **👻 Spectator Mode**: Death is not the end. Eliminated players can spectate the game, see everyone's true roles, and secretly read the private Mafia chat.
 - **📖 End-Game Match History**: At the end of every match, the game prints a full chronological timeline of Detective investigations, Doctor saves, and who voted for whom.
 - **🔌 Unified Executable**: No complicated setup. A single `.exe` file gives you an interactive menu to either host a server or join a game.
-
----
-
-## ✅ Hackathon Requirements Checklist
-
-### Core Requirements
-- [x] Supports 4+ players with hidden, role-based information (each player only sees what their role permits)
-- [x] A structured game loop: role assignment → phases (e.g., night/day, discuss/vote) → elimination → win condition
-- [x] Fully playable via terminal input/output: text-based only, no GUI frameworks
-- [x] Reasonably graceful handling of a player disconnecting or submitting invalid input mid-game
-- [x] A clear, unambiguous win condition for each side (e.g., Mafia eliminated / Mafia outnumbers Villagers)
-
-### Stretch Goals (Optional, Bonus Credit)
-- [ ] AI-controlled bot players to fill out a lobby when fewer humans are available *(Note: AI bots were successfully built but later removed to keep the game human-only)*
-- [x] Spectator mode for eliminated players
-- [x] Additional special roles (e.g., Detective, Doctor, Double Agent) beyond the basic two sides *(Detective and Doctor are fully implemented)*
-- [x] Match history / replay of role reveals and voting patterns at game end
 
 ---
 
@@ -90,5 +72,4 @@ Check out the [Technical Architecture Guide](TECHNICAL_ARCHITECTURE.md) for a de
 ---
 
 <div align="center">
-  <i>Built with ❤️ for the IAC Hackathon</i>
 </div>
