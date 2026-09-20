@@ -108,6 +108,9 @@ class GameClient:
 
         # Spectator state
         self.is_spectator = False
+        
+        # Pending investigation result to show after screen clear
+        self._pending_investigation: dict | None = None
 
         # Callbacks for message handling (set by the display/UI layer)
         self.on_message_handlers: dict[str, callable] = {}
@@ -455,11 +458,24 @@ class GameClient:
 
         elif phase == "DAWN":
             show_dawn_banner(round_num)
+            if self._pending_investigation:
+                show_investigation_result(
+                    self._pending_investigation.get("target", "?"),
+                    self._pending_investigation.get("result", "?"),
+                    self._pending_investigation.get("is_mafia", False)
+                )
 
         elif phase == "DISCUSSION":
             # Reset chat log for new discussion
             self._chat_log = []
             show_discussion_banner(round_num, duration, alive_players)
+            if self._pending_investigation:
+                show_investigation_result(
+                    self._pending_investigation.get("target", "?"),
+                    self._pending_investigation.get("result", "?"),
+                    self._pending_investigation.get("is_mafia", False)
+                )
+                self._pending_investigation = None
 
         elif phase == "VOTING":
             show_voting_banner(round_num, duration, alive_players)
@@ -545,11 +561,8 @@ class GameClient:
         show_suspicion_meter(mention_counts)
 
     def _on_investigation_result(self, data: dict):
-        """Handle INVESTIGATION_RESULT — display Detective's finding."""
-        target = data.get("target", "?")
-        result = data.get("result", "?")
-        is_mafia = data.get("is_mafia", False)
-        show_investigation_result(target, result, is_mafia)
+        """Handle INVESTIGATION_RESULT — store it to display after banner clears screen."""
+        self._pending_investigation = data
 
     def _on_spectator_start(self, data: dict):
         """Handle SPECTATOR_START — enter spectator mode with all roles revealed."""
