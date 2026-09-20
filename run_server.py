@@ -11,12 +11,6 @@ import argparse
 import sys
 import os
 
-# Try to load environment variables from .env file
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
 
 # Fix Windows terminal encoding for emoji/unicode support
 if sys.platform == "win32":
@@ -51,14 +45,6 @@ Examples:
         "--max-players", type=int, default=MAX_PLAYERS,
         help=f"Maximum players allowed (default: {MAX_PLAYERS})"
     )
-    parser.add_argument(
-        "--bots", type=int, default=0,
-        help="Number of AI bots to add on startup"
-    )
-    parser.add_argument(
-        "--bot-model", type=str, default="google/gemma-4-31b-it:free",
-        help="OpenRouter model slug for bots"
-    )
 
     args = parser.parse_args()
 
@@ -78,16 +64,7 @@ Examples:
 
     try:
         server.start()
-        
-        # Add bots if requested
-        if args.bots > 0:
-            import time
-            time.sleep(0.5) # Give server time to bind
-            print(f"[Server] Adding {args.bots} bot(s)...")
-            import random
-            for _ in range(args.bots):
-                bot_name = f"Bot_{random.randint(100, 999)}"
-                server.add_bot(bot_name, args.bot_model)
+
 
         # Keep main thread alive — server threads are daemon threads
         print("[Server] Press Ctrl+C to stop the server.\n")
@@ -101,19 +78,8 @@ Examples:
                 elif cmd == "/players":
                     names = server.get_player_names()
                     print(f"[Server] Connected players ({len(names)}): {', '.join(names) if names else 'none'}")
-                elif cmd.startswith("/addbots"):
-                    try:
-                        parts = cmd.split()
-                        count = int(parts[1]) if len(parts) > 1 else 1
-                        import random
-                        for _ in range(count):
-                            bot_name = f"Bot_{random.randint(100, 999)}"
-                            server.add_bot(bot_name, args.bot_model)
-                        print(f"[Server] Added {count} bot(s).")
-                    except ValueError:
-                        print("[Server] Usage: /addbots <number>")
                 elif cmd == "/help":
-                    print("[Server] Commands: /players, /addbots N, /quit, /stop, /exit, /help")
+                    print("[Server] Commands: /players, /quit, /stop, /exit, /help")
                 elif cmd:
                     print(f"[Server] Unknown command: {cmd}. Type /help for commands.")
             except EOFError:
