@@ -457,22 +457,6 @@ def show_suspicion_meter(mention_counts: dict):
     print()
 
 
-# ══════════════════════════════════════════════
-# Last Words Display
-# ══════════════════════════════════════════════
-
-def show_last_words(name: str, message: str):
-    """Display a player's last words in a dramatic frame."""
-    if not message:
-        return
-    
-    print()
-    print(f"  {Fore.RED}{Style.DIM}┌────────────────────────────────────┐{Style.RESET_ALL}")
-    print(f"  {Fore.RED}{Style.DIM}│  💀 {name}'s last words:{Style.RESET_ALL}")
-    print(f'  {Fore.RED}{Style.DIM}│  "{message}"{Style.RESET_ALL}')
-    print(f"  {Fore.RED}{Style.DIM}└────────────────────────────────────┘{Style.RESET_ALL}")
-    print()
-
 
 # ══════════════════════════════════════════════
 # Lobby Display
@@ -597,7 +581,7 @@ def show_spectator_roles(roles: dict):
 
 
 # ══════════════════════════════════════════════
-# Night Banner — Detective & Doctor
+# Night Banner — Detective
 # ══════════════════════════════════════════════
 
 def show_night_detective(round_num: int, duration: int = 0):
@@ -625,29 +609,43 @@ def show_night_detective(round_num: int, duration: int = 0):
     print(f"\n{Fore.BLUE}{DIVIDER_NIGHT}{Style.RESET_ALL}\n")
 
 
-def show_night_doctor(round_num: int, duration: int = 0):
-    """Night banner for the Doctor."""
-    clear_screen()
-    terminal_bell()
+# ══════════════════════════════════════════════
+# Task Display
+# ══════════════════════════════════════════════
+
+def show_task_list(tasks: list):
+    """Display the list of tasks for the player."""
+    if not tasks:
+        return
+    print(f"\n  {Fore.CYAN}{Style.BRIGHT}═══ 📋 YOUR TASKS ═══{Style.RESET_ALL}")
+    for t in tasks:
+        diff_color = Fore.GREEN if t['difficulty'] == 'easy' else Fore.YELLOW if t['difficulty'] == 'medium' else Fore.RED
+        if t.get('completed', False):
+            # Strikethrough for completed tasks
+            print(f"  {Style.DIM}\033[9m[{t['difficulty'].upper()}] {t['display']} (COMPLETED)\033[0m{Style.RESET_ALL}")
+        else:
+            print(f"  {diff_color}[{t['difficulty'].upper()}]{Style.RESET_ALL} {Fore.CYAN}{t['display']}{Style.RESET_ALL} {Style.DIM}{t.get('hint', '')}{Style.RESET_ALL}")
+    print(f"  {Style.DIM}Use: /task <answer> to complete.{Style.RESET_ALL}\n")
+
+def show_task_progress(total: int, completed: int, percentage: int):
+    """Display the global task bar."""
+    if total == 0:
+        return
+    bar_len = 30
+    filled = int((percentage / 100) * bar_len)
+    bar = "█" * filled + "░" * (bar_len - filled)
     
-    print(f"{Fore.BLUE}{Style.BRIGHT}{NIGHT_BANNER}{Style.RESET_ALL}")
-    print(f"  {Fore.BLUE}{Style.BRIGHT}Round {round_num}{Style.RESET_ALL}")
-    
-    if duration:
-        print(f"  {Style.DIM}Time limit: {duration} seconds{Style.RESET_ALL}")
-    
-    print()
-    typewriter(f"  {narrate_night_fall()}", delay=0.015, color=Fore.BLUE)
-    print()
-    
-    print(f"  {Fore.GREEN}{Style.BRIGHT}╔═══════════════════════════════════╗{Style.RESET_ALL}")
-    print(f"  {Fore.GREEN}{Style.BRIGHT}║  💉 You are the DOCTOR.          ║{Style.RESET_ALL}")
-    print(f"  {Fore.GREEN}{Style.BRIGHT}║     Choose a player to protect    ║{Style.RESET_ALL}")
-    print(f"  {Fore.GREEN}{Style.BRIGHT}║     from the Mafia tonight. Use:  ║{Style.RESET_ALL}")
-    print(f"  {Fore.GREEN}{Style.BRIGHT}║     /protect <name> or <#>        ║{Style.RESET_ALL}")
-    print(f"  {Fore.GREEN}{Style.BRIGHT}╚═══════════════════════════════════╝{Style.RESET_ALL}")
-    
-    print(f"\n{Fore.BLUE}{DIVIDER_NIGHT}{Style.RESET_ALL}\n")
+    color = Fore.GREEN if percentage == 100 else Fore.CYAN
+    print(f"\n  {color}{Style.BRIGHT}TOWN TASK PROGRESS:{Style.RESET_ALL}")
+    print(f"  {color}[{bar}] {percentage}% ({completed}/{total}){Style.RESET_ALL}\n")
+
+def show_task_result(correct: bool, message: str):
+    """Display the result of a task submission."""
+    color = Fore.GREEN if correct else Fore.RED
+    print(f"\n  {color}{Style.BRIGHT}{message}{Style.RESET_ALL}\n")
+
+
+
 
 
 # ══════════════════════════════════════════════

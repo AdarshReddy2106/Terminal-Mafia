@@ -11,6 +11,13 @@ import argparse
 import sys
 import os
 
+# Try to load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # Fix Windows terminal encoding for emoji/unicode support
 if sys.platform == "win32":
     os.system("")  # Enable ANSI escape sequences on Windows

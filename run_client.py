@@ -104,21 +104,18 @@ Examples:
             if not user_input:
                 continue
 
-            # Handle last words mode — any text is sent as last words
-            if client._awaiting_last_words:
-                client.send_last_words(user_input)
-                print(f"  {Style.DIM}Your final words have been spoken.{Style.RESET_ALL}")
-                continue
+
 
             # Handle client-side commands
             if user_input.lower() in ("/quit", "/exit", "/leave"):
                 print(f"\n  {Fore.YELLOW}Leaving the game...{Style.RESET_ALL}")
                 break
 
-            # If spectator, block everything except info commands
+            # If spectator, block everything except info commands and task submissions
             is_info_command = user_input.lower() in ("/players", "/role", "/suspicion", "/help")
-            if client.is_spectator and not is_info_command and not user_input.startswith("/quit"):
-                print(f"  {Fore.LIGHTBLACK_EX}You are a spectator. You cannot interact with the game.{Style.RESET_ALL}")
+            is_task_command = user_input.lower().startswith("/task")
+            if client.is_spectator and not (is_info_command or is_task_command) and not user_input.startswith("/quit"):
+                print(f"  {Fore.LIGHTBLACK_EX}You are a spectator. You can only observe and do tasks.{Style.RESET_ALL}")
                 continue
 
             if user_input.lower() == "/start":
@@ -149,8 +146,14 @@ Examples:
                 target = user_input[9:].strip()
                 if target:
                     client.send_night_action(target, action="protect")
+            elif user_input.lower().startswith("/task "):
+                answer = user_input[6:].strip()
+                if answer:
+                    # Let the server figure out which task the answer is for.
+                    # Send empty string as task_id, the server will check all pending tasks.
+                    client.send_task_submit("", answer)
                 else:
-                    print(f"  {Fore.RED}Usage: /protect <player_name> or /protect <number>{Style.RESET_ALL}")
+                    print(f"  {Fore.RED}Usage: /task <answer>{Style.RESET_ALL}")
 
             elif user_input.lower() == "/players":
                 if client.alive_players:
@@ -190,12 +193,14 @@ Examples:
                 print(f"    /kill <name/#> — Choose night target (Mafia only)")
                 print(f"    /investigate <name/#> — Investigate player (Detective only)")
                 print(f"    /protect <name/#> — Protect player (Doctor only)")
+                print(f"    /task <answer> — Submit answer for a night task")
                 print(f"    /players       — Show alive players")
                 print(f"    /role          — Show your current role")
                 print(f"    /suspicion     — Show suspicion meter")
                 print(f"    /quit          — Leave the game")
                 print(f"    /help          — Show this help")
                 print(f"    (anything else) — Send as chat message\n")
+
 
             elif user_input.startswith("/"):
                 print(f"  {Fore.RED}Unknown command: {user_input}. Type /help{Style.RESET_ALL}")

@@ -7,8 +7,9 @@ Orchestrates the full game lifecycle:
 Runs the game loop in its own thread, managing phase transitions,
 timers, collecting votes/actions, and broadcasting results.
 
-Supports special roles: Detective, Doctor, Double Agent
-Supports spectator mode for eliminated players.
+Supports special roles: Detective, Doctor, Engineer
+Supports task system with task-bar win condition.
+Supports spectator mode and ghost tasks for eliminated players.
 """
 
 import threading
@@ -19,17 +20,21 @@ from common.constants import (
     PHASE_VOTING, PHASE_GAME_OVER,
     NIGHT_PHASE_DURATION, DISCUSSION_PHASE_DURATION,
     VOTING_PHASE_DURATION, DAWN_REVEAL_DURATION,
-    ROLE_MAFIA, ROLE_DETECTIVE, ROLE_DOCTOR, ROLE_DOUBLE_AGENT,
+    MAFIA_KILL_DELAY,
+    ROLE_MAFIA, ROLE_DETECTIVE, ROLE_DOCTOR, ROLE_ENGINEER,
     TEAM_TOWN, TEAM_MAFIA
 )
 from common.protocol import (
     create_message, msg_server_announcement,
     MSG_ROLE_ASSIGN, MSG_PHASE_CHANGE, MSG_NIGHT_RESULT,
     MSG_VOTE_RESULT, MSG_GAME_OVER, MSG_CHAT_MSG, MSG_PLAYER_LIST,
-    MSG_SUSPICION_DATA, MSG_INVESTIGATION_RESULT, MSG_SPECTATOR_START
+    MSG_SUSPICION_DATA, MSG_INVESTIGATION_RESULT, MSG_SPECTATOR_START,
+    MSG_TASK_ASSIGN, MSG_TASK_RESULT, MSG_TASK_PROGRESS,
+    MSG_TASK_SUBMIT
 )
 from server.role_manager import assign_roles, get_role_description, get_team, has_night_action
 from server.state_manager import GameState
+from server.task_manager import TaskTracker, generate_player_tasks, generate_bonus_task
 
 
 class GameEngine:
@@ -39,10 +44,12 @@ class GameEngine:
     Works with the GameServer to:
     - Assign roles and notify players
     - Run timed phases (night, discussion, voting)
-    - Collect and resolve votes (including Detective/Doctor actions)
-    - Check win conditions after each elimination
+    - Assign and track tasks during night
+    - Collect and resolve votes (including Detective actions)
+    - Doctor protection is chosen during Discussion, applied at Night
+    - Check win conditions after each elimination (+ task-bar win)
     - Announce game over and reveal all roles
-    - Manage spectator mode for eliminated players
+    - Manage spectator mode and ghost tasks for eliminated players
     """
 
     def __init__(self, server):
@@ -57,6 +64,12 @@ class GameEngine:
         self._game_thread = None
         self._phase_event = threading.Event()  # Used to signal early phase completion
         self._chat_log: list[dict] = []  # Track chat messages for suspicion meter
+
+        # Task system
+        self.task_tracker = TaskTracker()
+
+        # Night phase timing — tracks when night started (for kill delay)
+        self._night_start_time = 0.0
 
     # ──────────────────────────────────────────
     # Game Start
@@ -104,9 +117,8 @@ class GameEngine:
 
     def _send_role_assignments(self, roles: dict[str, str], player_ids: list[str]):
         """Send each player their role and relevant info (privately)."""
-        # Find Mafia team members (Mafia + Double Agent know each other)
-        mafia_team_ids = [pid for pid, role in roles.items()
-                         if role in (ROLE_MAFIA, ROLE_DOUBLE_AGENT)]
+        # Find Mafia team members (Mafia know each other)
+        mafia_team_ids = [pid for pid, role in roles.items() if role == ROLE_MAFIA]
         mafia_team_names = [self.state.get_name(pid) for pid in mafia_team_ids]
 
         for pid in player_ids:
@@ -119,8 +131,8 @@ class GameEngine:
                 "description": description,
             }
 
-            # Mafia team members learn who their teammates are
-            if role in (ROLE_MAFIA, ROLE_DOUBLE_AGENT):
+            # Mafia members learn who their teammates are
+            if role == ROLE_MAFIA:
                 teammates = [self.state.get_name(mid) for mid in mafia_team_ids if mid != pid]
                 data["teammates"] = teammates
 
@@ -196,10 +208,12 @@ class GameEngine:
         Execute the night phase.
 
         - Broadcast PHASE_CHANGE to all
-        - Mafia members choose a target (timed)
+        - Assign tasks to all alive players
+        - Mafia members choose a target (after 15s delay)
         - Detective investigates a player
-        - Doctor protects a player
+        - Doctor protection was already chosen during Discussion
         - Resolve night kills (with Doctor save check)
+        - Check task-bar win condition
         - Broadcast results
 
         Returns win_result dict if game is over, else None.
@@ -208,6 +222,7 @@ class GameEngine:
         self.server.phase = PHASE_NIGHT
         self.state.clear_night_votes()
         self._phase_event.clear()
+        self._night_start_time = time.time()
 
         print(f"[Game] 🌙 Night Phase (Round {round_num})")
 
@@ -218,41 +233,62 @@ class GameEngine:
             "duration": NIGHT_PHASE_DURATION
         }))
 
-        # Send alive player list to Mafia for targeting
+        # ── Assign or refresh tasks for all players ──
+        all_players = list(self.state.names.keys())
+        for pid in all_players:
+            role = self.state.get_role(pid)
+            is_town = (get_team(role) != TEAM_MAFIA)
+            
+            if pid not in self.task_tracker.player_tasks:
+                tasks = generate_player_tasks()
+                self.task_tracker.assign_tasks(pid, tasks, is_town=is_town)
+            else:
+                self.task_tracker.refresh_tasks(pid)
+
+            tasks = self.task_tracker.player_tasks[pid]
+            msg = "Complete your tasks! Type /task <answer> to submit."
+            if not self.state.is_alive(pid):
+                msg = "👻 Ghost tasks! Type /task <answer> to submit."
+                
+            # Send tasks to the player
+            self.server.send_to_player(pid, create_message(MSG_TASK_ASSIGN, {
+                "tasks": [{"id": t["id"], "difficulty": t["difficulty"],
+                           "type": t["type"], "prompt": t["prompt"],
+                           "display": t["display"], "completed": t.get("completed", False),
+                           "hint": t.get("hint", "")} for t in tasks],
+                "message": msg,
+            }))
+
         alive_list = self.state.get_alive_player_list()
+
+        # ── Send Mafia kill targets (they can only use /kill after 15s) ──
         mafia_members = self.state.get_alive_mafia()
         for mid in mafia_members:
-            # Show Mafia who they can target (exclude fellow Mafia team)
             mafia_team = self.state.get_alive_mafia_team()
             targets = [p for p in alive_list if p["id"] not in mafia_team]
             self.server.send_to_player(mid, create_message(MSG_PLAYER_LIST, {
                 "players": targets,
                 "context": "night_targets"
             }))
+            self.server.send_to_player(mid, msg_server_announcement(
+                f"⏳ You must wait {MAFIA_KILL_DELAY} seconds before using /kill."
+            ))
 
-        # Send target list to Detective (if alive)
+        # ── Send target list to Detective (if alive) ──
         detective_id = self.state.get_alive_detective()
         if detective_id:
-            # Detective can investigate anyone alive except themselves
             det_targets = [p for p in alive_list if p["id"] != detective_id]
             self.server.send_to_player(detective_id, create_message(MSG_PLAYER_LIST, {
                 "players": det_targets,
                 "context": "investigate_targets"
             }))
 
-        # Send target list to Doctor (if alive)
-        doctor_id = self.state.get_alive_doctor()
-        if doctor_id:
-            # Doctor can protect anyone alive (including themselves)
-            self.server.send_to_player(doctor_id, create_message(MSG_PLAYER_LIST, {
-                "players": alive_list,
-                "context": "protect_targets"
-            }))
+        # Doctor no longer acts at Night — protection was chosen during Discussion
 
         # Wait for night duration or until all night-role players have acted
         self._wait_for_phase(NIGHT_PHASE_DURATION, self._all_night_actions_done)
 
-        # Resolve Detective investigation (send result privately BEFORE dawn)
+        # ── Resolve Detective investigation (send result privately BEFORE dawn) ──
         investigation = self.state.resolve_detective()
         if investigation:
             det_id = investigation["detective_id"]
@@ -267,7 +303,19 @@ class GameEngine:
                 "is_mafia": is_mafia
             }))
 
-        # Resolve night (with Doctor save check)
+        # ── Check task-bar win condition ──
+        if self.task_tracker.check_task_win():
+            return {
+                "winner": TEAM_TOWN,
+                "reason": "Town completed all tasks! The task bar is full!",
+                "alive_town": len(self.state.get_alive_town()),
+                "alive_mafia": len(self.state.get_alive_mafia()),
+            }
+
+        # Broadcast final task progress
+        self._broadcast_task_progress()
+
+        # ── Resolve night (with Doctor save check) ──
         night_result = self.state.resolve_night()
 
         # ── Dawn Reveal ──
@@ -280,7 +328,6 @@ class GameEngine:
         }))
 
         if night_result["saved"]:
-            # Doctor saved someone!
             print(f"[Game] 💉 Doctor saved {night_result['saved_name']}!")
             self.server.broadcast(create_message(MSG_NIGHT_RESULT, {
                 "killed": None,
@@ -304,7 +351,7 @@ class GameEngine:
                 "message": f"☠️  {killed_name} was found dead! They were a {killed_role}."
             }))
 
-            # Send spectator mode to the killed player
+            # Start spectator mode for the killed player
             self._start_spectator(night_result["killed_id"])
         else:
             print(f"[Game] Night: No one was killed.")
@@ -339,11 +386,7 @@ class GameEngine:
                     if pid not in self.state.detective_target:
                         return False
 
-            # Check Doctor
-            for pid, role in self.state.roles.items():
-                if role == ROLE_DOCTOR and self.state.alive.get(pid, False):
-                    if pid not in self.state.doctor_target:
-                        return False
+            # Doctor no longer acts at night — skip check
 
             return True
 
@@ -356,13 +399,17 @@ class GameEngine:
         Execute the discussion phase.
 
         - Broadcast PHASE_CHANGE
-        - Players can chat freely (handled by existing chat logic)
+        - Players can chat freely
+        - Doctor uses /protect during this phase
         - Timed — ends after DISCUSSION_PHASE_DURATION seconds
         """
         self.phase = PHASE_DISCUSSION
         self.server.phase = PHASE_DISCUSSION
         self._phase_event.clear()
         self._chat_log.clear()
+
+        # Clear doctor target for the upcoming night
+        self.state.clear_doctor_target()
 
         print(f"[Game] 💬 Discussion Phase (Round {round_num}) — {DISCUSSION_PHASE_DURATION}s")
 
@@ -375,6 +422,17 @@ class GameEngine:
             "duration": DISCUSSION_PHASE_DURATION,
             "alive_players": [p["name"] for p in alive_list]
         }))
+
+        # Send protect targets to Doctor (if alive)
+        doctor_id = self.state.get_alive_doctor()
+        if doctor_id:
+            self.server.send_to_player(doctor_id, create_message(MSG_PLAYER_LIST, {
+                "players": alive_list,
+                "context": "protect_targets"
+            }))
+            self.server.send_to_player(doctor_id, msg_server_announcement(
+                "🩺 Doctor: Use /protect <name> now to choose who to protect tonight."
+            ))
 
         # Wait for discussion timer
         self._wait_for_phase(DISCUSSION_PHASE_DURATION)
@@ -411,7 +469,6 @@ class GameEngine:
         # Send voteable player list to each alive player
         alive_ids = self.state.get_alive_players()
         for pid in alive_ids:
-            # Can vote for anyone alive except themselves
             targets = [p for p in alive_list if p["id"] != pid]
             self.server.send_to_player(pid, create_message(MSG_PLAYER_LIST, {
                 "players": targets,
@@ -440,7 +497,7 @@ class GameEngine:
                 )
             }))
 
-            # Send spectator mode to the eliminated player
+            # Start spectator mode for the eliminated player
             self._start_spectator(vote_result["eliminated_id"])
 
         elif vote_result["is_tie"]:
@@ -503,6 +560,15 @@ class GameEngine:
             self.server.send_to_player(pid, message)
 
     # ──────────────────────────────────────────
+    # Task Progress
+    # ──────────────────────────────────────────
+
+    def _broadcast_task_progress(self):
+        """Broadcast current task-bar progress to all players."""
+        progress = self.task_tracker.get_task_progress()
+        self.server.broadcast(create_message(MSG_TASK_PROGRESS, progress))
+
+    # ──────────────────────────────────────────
     # Game Over
     # ──────────────────────────────────────────
 
@@ -512,6 +578,14 @@ class GameEngine:
         self.server.phase = PHASE_GAME_OVER
 
         win_result = self.state.check_win_condition()
+
+        # Also check task win
+        if not win_result and self.task_tracker.check_task_win():
+            win_result = {
+                "winner": TEAM_TOWN,
+                "reason": "Town completed all tasks! The task bar is full!",
+            }
+
         summary = self.state.get_game_summary()
 
         if win_result:
@@ -531,6 +605,9 @@ class GameEngine:
                 "survived": info["survived"]
             }
 
+        # Include task progress in summary
+        task_progress = self.task_tracker.get_task_progress()
+
         self.server.broadcast(create_message(MSG_GAME_OVER, {
             "winner": winner,
             "reason": reason,
@@ -539,6 +616,7 @@ class GameEngine:
             "elimination_log": summary["elimination_log"],
             "detective_results": summary.get("detective_results", []),
             "doctor_saves": summary.get("doctor_saves", []),
+            "task_progress": task_progress,
         }))
 
         # Reset to lobby after a delay
@@ -597,7 +675,7 @@ class GameEngine:
         Process a night action from a player.
         Called by the server when it receives a NIGHT_ACTION message.
 
-        Supports: Mafia kill, Detective investigate, Doctor protect
+        Supports: Mafia kill (with 15s delay), Detective investigate
 
         Returns an error message string if invalid, else None.
         """
@@ -619,8 +697,14 @@ class GameEngine:
 
         role = self.state.get_role(player_id)
 
-        # ── Mafia Kill ──
+        # ── Mafia Kill (with 15s delay) ──
         if role == ROLE_MAFIA and action in ("kill", "vote", ""):
+            # Enforce kill delay
+            elapsed = time.time() - self._night_start_time
+            if elapsed < MAFIA_KILL_DELAY:
+                remaining = int(MAFIA_KILL_DELAY - elapsed)
+                return f"⏳ You must wait {remaining} more seconds before killing."
+
             if not self.state.add_mafia_vote(player_id, target_id):
                 return "Invalid target. You can't target yourself or another Mafia member."
 
@@ -654,20 +738,112 @@ class GameEngine:
             print(f"[Game] 🔍 {voter_name} (Detective) investigating {target_name}")
             return None  # Success
 
-        # ── Doctor Protect ──
+        # ── Doctor Protect (now during Discussion phase — but handle if sent at night) ──
         if role == ROLE_DOCTOR and action in ("protect", ""):
-            if not self.state.add_doctor_action(player_id, target_id):
-                return "Invalid protection target."
-
-            voter_name = self.state.get_name(player_id)
-            print(f"[Game] 💉 {voter_name} (Doctor) protecting {target_name}")
-            return None  # Success
-
-        # ── Double Agent (can chat with Mafia but no kill vote) ──
-        if role == ROLE_DOUBLE_AGENT:
-            return "As the Double Agent, you don't perform night actions. Chat with your Mafia allies!"
+            return "As the Doctor, use /protect during the Discussion phase, not at Night!"
 
         return f"You can't perform that action as {role}."
+
+    def handle_doctor_protect(self, player_id: str, data: dict) -> str | None:
+        """
+        Process Doctor's protection choice during Discussion phase.
+        
+        Returns error message string if invalid, else None.
+        """
+        if self.phase != PHASE_DISCUSSION:
+            return "You can only use /protect during the Discussion phase!"
+
+        role = self.state.get_role(player_id)
+        if role != ROLE_DOCTOR:
+            return "Only the Doctor can use /protect!"
+
+        target_name = data.get("target", "")
+        if not target_name:
+            return "You must specify who to protect."
+
+        target_id = self.state.get_player_id_by_name(target_name)
+        if not target_id:
+            return f"Player '{target_name}' not found."
+
+        if not self.state.is_alive(target_id):
+            return f"{target_name} is already dead."
+
+        if not self.state.add_doctor_action(player_id, target_id):
+            return "Invalid protection target."
+
+        voter_name = self.state.get_name(player_id)
+        print(f"[Game] 💉 {voter_name} (Doctor) protecting {target_name}")
+        self.server.send_to_player(player_id, msg_server_announcement(
+            f"🛡️ You will protect {target_name} tonight."
+        ))
+        return None
+
+    def handle_task_submit(self, player_id: str, data: dict) -> str | None:
+        """
+        Process a task answer submission from a player.
+        Called by the server when it receives a TASK_SUBMIT message.
+
+        Returns error message string if invalid, else None.
+        """
+        task_id = data.get("task_id", "")
+        answer = data.get("answer", "")
+
+        if self.phase != PHASE_NIGHT:
+            return "You can only do tasks at night."
+
+        if not answer:
+            return "You must provide an answer."
+
+        result = self.task_tracker.submit_answer(player_id, task_id, answer)
+
+        if not result["valid"]:
+            return "Invalid task or already completed."
+
+        player_name = self.state.get_name(player_id)
+
+        if result["correct"]:
+            print(f"[Game] ✅ {player_name} completed task {task_id}")
+            self.server.send_to_player(player_id, create_message(MSG_TASK_RESULT, {
+                "task_id": task_id,
+                "correct": True,
+                "message": "✅ Correct! Task completed.",
+                "all_done": result["all_done"],
+            }))
+
+            # Broadcast updated task progress
+            self._broadcast_task_progress()
+
+            # If Engineer finished all tasks, give bonus task
+            role = self.state.get_role(player_id)
+            if result["all_done"] and role == ROLE_ENGINEER:
+                pending = self.task_tracker.get_pending_tasks(player_id)
+                # Only give bonus if no pending tasks (i.e. they finished original 3)
+                bonus_already = any(t.get("is_bonus") for t in self.task_tracker.get_all_tasks(player_id))
+                if not pending and not bonus_already:
+                    bonus = generate_bonus_task()
+                    self.task_tracker.add_bonus_task(player_id, bonus)
+                    self.server.send_to_player(player_id, create_message(MSG_TASK_ASSIGN, {
+                        "tasks": [{"id": bonus["id"], "difficulty": bonus["difficulty"],
+                                   "type": bonus["type"], "prompt": bonus["prompt"],
+                                   "display": bonus["display"],
+                                   "hint": bonus.get("hint", "")}],
+                        "message": "🔧 Engineer bonus! You get 1 extra task!",
+                        "is_bonus": True,
+                    }))
+
+            # Check task-bar win
+            if self.task_tracker.check_task_win():
+                self._phase_event.set()  # End current phase early
+
+        else:
+            self.server.send_to_player(player_id, create_message(MSG_TASK_RESULT, {
+                "task_id": task_id,
+                "correct": False,
+                "message": "❌ Wrong answer! Try again.",
+                "all_done": False,
+            }))
+
+        return None
 
     def handle_vote(self, player_id: str, data: dict) -> str | None:
         """
@@ -731,8 +907,8 @@ class GameEngine:
 
         if self.phase == PHASE_NIGHT:
             role = self.state.get_role(player_id)
-            if role in (ROLE_MAFIA, ROLE_DOUBLE_AGENT):
-                # Mafia team private chat — send to all Mafia team members
+            if role == ROLE_MAFIA:
+                # Mafia private chat — send to all Mafia members
                 sender_name = self.state.get_name(player_id)
                 mafia_team = self.state.get_alive_mafia_team()
                 chat_msg = create_message(MSG_CHAT_MSG, {

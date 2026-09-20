@@ -27,6 +27,14 @@ NIGHT_PHASE_DURATION = 60
 DISCUSSION_PHASE_DURATION = 90
 VOTING_PHASE_DURATION = 30
 DAWN_REVEAL_DURATION = 5
+MAFIA_KILL_DELAY = 15          # Mafia must wait this many seconds before using /kill
+GHOST_TASK_DURATION = 30       # How long ghosts have to complete tasks after death
+
+# ──────────────────────────────────────────────
+# Task Settings
+# ──────────────────────────────────────────────
+TASKS_PER_PLAYER = 3           # Each player gets 3 tasks (1 easy, 1 medium, 1 hard)
+ENGINEER_BONUS_TASKS = 1       # Engineer gets 1 bonus task after finishing their 3
 
 # ──────────────────────────────────────────────
 # Role Distribution
@@ -45,7 +53,8 @@ ROLE_VILLAGER = "Villager"
 ROLE_MAFIA = "Mafia"
 ROLE_DETECTIVE = "Detective"
 ROLE_DOCTOR = "Doctor"
-ROLE_DOUBLE_AGENT = "Double Agent"
+ROLE_DOUBLE_AGENT = "Double Agent"  # Kept for backward compat, no longer assigned
+ROLE_ENGINEER = "Engineer"
 
 # Teams
 TEAM_TOWN = "Town"
@@ -60,3 +69,4 @@ PHASE_DAWN = "DAWN"
 PHASE_DISCUSSION = "DISCUSSION"
 PHASE_VOTING = "VOTING"
 PHASE_GAME_OVER = "GAME_OVER"
+

@@ -13,8 +13,10 @@ from queue import Queue
 
 from common.protocol import (
     parse_messages, MSG_PHASE_CHANGE, MSG_ROLE_ASSIGN,
-    MSG_PLAYER_LIST, MSG_CHAT_MSG, MSG_NIGHT_RESULT, MSG_VOTE_RESULT
+    MSG_PLAYER_LIST, MSG_CHAT_MSG, MSG_NIGHT_RESULT, MSG_VOTE_RESULT,
+    MSG_TASK_ASSIGN
 )
+from common.constants import MAFIA_KILL_DELAY
 from bots.llm_client import LLMClient
 
 
@@ -118,15 +120,19 @@ class BotPlayer:
             targets = [p["name"] for p in data.get("players", [])]
             
             if context == "night_targets" and self.role == "Mafia":
-                time.sleep(random.uniform(2.0, 4.0))
-                self._do_night_action(targets, "kill")
+                time.sleep(MAFIA_KILL_DELAY + random.uniform(1.0, 3.0))
+                self._do_target_action(targets, "kill")
             elif context == "investigate_targets" and self.role == "Detective":
                 time.sleep(random.uniform(2.0, 4.0))
-                self._do_night_action(targets, "investigate")
+                self._do_target_action(targets, "investigate")
             elif context == "protect_targets" and self.role == "Doctor":
                 time.sleep(random.uniform(2.0, 4.0))
-                self._do_night_action(targets, "protect")
+                self._do_target_action(targets, "protect")
                 
+        elif msg_type in (MSG_TASK_ASSIGN, MSG_GHOST_TASKS):
+            tasks = data.get("tasks", [])
+            self._do_tasks(tasks)
+
         elif msg_type == MSG_CHAT_MSG:
             sender = data.get("from")
             message = data.get("message")
@@ -142,10 +148,6 @@ class BotPlayer:
             eliminated = data.get("eliminated")
             if killed == self.name or eliminated == self.name:
                 self.is_alive = False
-                # Send a cheeky last words
-                time.sleep(1)
-                self._send_to_server({"type": "LAST_WORDS", "data": {"message": "I'll be back... as a spectator."}})
-
     # ── Actions ──
 
     def _send_to_server(self, msg: dict):
@@ -175,10 +177,13 @@ class BotPlayer:
             
         elif msg_type == "NIGHT_ACTION":
             engine.handle_night_action(self.player_id, data)
+
+        elif msg_type == "DOCTOR_PROTECT":
+            engine.handle_doctor_protect(self.player_id, data)
+
+        elif msg_type == "TASK_SUBMIT":
+            engine.handle_task_submit(self.player_id, data)
             
-        elif msg_type == "LAST_WORDS":
-            # Handled by server directly
-            self.server._handle_last_words(self, data)
 
     def _build_system_prompt(self) -> str:
         """Create the context for the LLM."""
@@ -249,16 +254,55 @@ Reply ONLY with the exact name of the player you are voting for. No other text."
                 
         # Fallback
         self._random_vote(valid_targets)
-        
-    def _do_night_action(self, targets: list, action: str):
-        """Generate a night action target using the LLM."""
+
+    def _do_tasks(self, tasks: list):
+        """Bots auto-complete tasks using the answers provided in the task dict."""
+        # Note: In a real game we wouldn't send the answer in the dict, but for this prototype
+        # we can just have the bot instantly or slowly submit the correct answer.
+        # Actually, wait, the client task dict doesn't contain the answer!
+        # The prompt is "Type this word exactly: shadow" or "Solve: 5 + 3 = ?".
+        # We can use the LLM to solve the task, or parse the prompt!
+        # Parsing is faster and more reliable.
+        for t in tasks:
+            time.sleep(random.uniform(1.0, 3.0))
+            prompt = t["prompt"]
+            answer = ""
+            if t["type"] == "typing":
+                # "Type this word exactly: shadow"
+                parts = prompt.split(":")
+                if len(parts) > 1:
+                    answer = parts[1].strip()
+            elif t["type"] == "math":
+                # "Solve: 5 + 3 = ?"
+                parts = prompt.replace("Solve:", "").replace("?", "").replace("=", "").strip().split()
+                if len(parts) == 3:
+                    a, op, b = parts
+                    try:
+                        if op == "+": answer = str(int(a) + int(b))
+                        elif op == "-": answer = str(int(a) - int(b))
+                        elif op == "×": answer = str(int(a) * int(b))
+                    except:
+                        pass
+            elif t["type"] == "unscramble":
+                # Bot cheating by using LLM to unscramble
+                res = self.llm.generate("You are a helpful assistant.", f"Unscramble this word: {prompt.split(': ')[1]}. Reply with ONLY the unscrambled word.", max_tokens=10)
+                if res:
+                    answer = res.strip(".,'\" \n")
+            
+            if answer:
+                self._send_to_server({"type": "TASK_SUBMIT", "data": {"task_id": t["id"], "answer": answer}})
+
+    def _do_target_action(self, targets: list, action: str):
+        """Generate a target action (kill, investigate, protect) using the LLM."""
         if not self.is_alive:
             return
+            
+        msg_type = "DOCTOR_PROTECT" if action == "protect" else "NIGHT_ACTION"
             
         if not self.llm.is_configured():
             if targets:
                 target = random.choice(targets)
-                self._send_to_server({"type": "NIGHT_ACTION", "data": {"action": action, "target": target}})
+                self._send_to_server({"type": msg_type, "data": {"action": action, "target": target}})
             return
             
         recent_chat = "\n".join(self.chat_history[-8:])
@@ -282,13 +326,13 @@ Reply ONLY with the exact name of the player. No other text."""
         if response:
             target = response.strip(".,'\" \n")
             if any(target.lower() == p.lower() for p in targets):
-                self._send_to_server({"type": "NIGHT_ACTION", "data": {"action": action, "target": target}})
+                self._send_to_server({"type": msg_type, "data": {"action": action, "target": target}})
                 return
                 
         # Fallback
         if targets:
             target = random.choice(targets)
-            self._send_to_server({"type": "NIGHT_ACTION", "data": {"action": action, "target": target}})
+            self._send_to_server({"type": msg_type, "data": {"action": action, "target": target}})
 
     def _random_vote(self, valid_targets):
         """Fallback to random voting if API fails."""

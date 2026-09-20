@@ -21,15 +21,16 @@ from common.constants import (
     PHASE_VOTING, PHASE_GAME_OVER, ROLE_MAFIA
 )
 from common.protocol import (
-    parse_messages, msg_join, msg_chat, msg_pong, msg_last_words,
+    parse_messages, msg_join, msg_chat, msg_pong,
     create_message,
     MSG_WELCOME, MSG_PLAYER_JOINED, MSG_PLAYER_LEFT, MSG_PLAYER_LIST,
     MSG_LOBBY_STATUS, MSG_CHAT_MSG, MSG_ERROR, MSG_PING,
     MSG_SERVER_MSG, MSG_PHASE_CHANGE, MSG_ROLE_ASSIGN,
     MSG_VOTE_RESULT, MSG_NIGHT_RESULT, MSG_GAME_OVER,
     MSG_START_GAME, MSG_VOTE, MSG_NIGHT_ACTION,
-    MSG_LAST_WORDS, MSG_LAST_WORDS_BROADCAST, MSG_SUSPICION_DATA,
-    MSG_INVESTIGATION_RESULT, MSG_SPECTATOR_START
+    MSG_SUSPICION_DATA, MSG_INVESTIGATION_RESULT, MSG_SPECTATOR_START,
+    MSG_TASK_ASSIGN, MSG_TASK_SUBMIT, MSG_TASK_RESULT,
+    MSG_TASK_PROGRESS
 )
 
 # Try to import colorama for colored output; fall back gracefully
@@ -53,11 +54,12 @@ from client.display import (
     show_night_banner, show_dawn_banner, show_discussion_banner,
     show_voting_banner, show_role_reveal, show_night_kill,
     show_no_kill, show_vote_result, show_game_over,
-    show_target_list, show_suspicion_meter, show_last_words,
+    show_target_list, show_suspicion_meter,
     show_lobby, show_countdown_warning, ROLE_COLORS,
     show_investigation_result, show_doctor_save,
     show_spectator_banner, show_spectator_roles,
-    show_night_detective, show_night_doctor, show_match_history
+    show_night_detective, show_match_history,
+    show_task_list, show_task_progress, show_task_result
 )
 
 
@@ -103,10 +105,6 @@ class GameClient:
 
         # Chat tracking for suspicion meter
         self._chat_log: list[dict] = []
-
-        # Last words state
-        self._awaiting_last_words = False
-        self._last_words_name = ""
 
         # Spectator state
         self.is_spectator = False
@@ -201,11 +199,13 @@ class GameClient:
             })
             self._send_raw(msg)
 
-    def send_last_words(self, message: str):
-        """Send last words after being eliminated."""
+    def send_task_submit(self, task_id: str, answer: str):
+        """Submit an answer to a task."""
         if self.connected:
-            self._send_raw(msg_last_words(message))
-            self._awaiting_last_words = False
+            self._send_raw(create_message(MSG_TASK_SUBMIT, {
+                "task_id": task_id,
+                "answer": answer
+            }))
 
     def _resolve_target(self, target: str, target_list: list) -> str:
         """
@@ -310,15 +310,25 @@ class GameClient:
             MSG_VOTE_RESULT: self._on_vote_result,
             MSG_GAME_OVER: self._on_game_over,
             MSG_PLAYER_LIST: self._on_player_list,
-            MSG_LAST_WORDS_BROADCAST: self._on_last_words_broadcast,
-            MSG_SUSPICION_DATA: self._on_suspicion_data,
-            MSG_INVESTIGATION_RESULT: self._on_investigation_result,
-            MSG_SPECTATOR_START: self._on_spectator_start,
         }
 
         handler = handler_map.get(msg_type)
         if handler:
             handler(data)
+        elif msg_type == MSG_SUSPICION_DATA:
+            self._on_suspicion_data(data)
+        elif msg_type == MSG_INVESTIGATION_RESULT:
+            self._on_investigation_result(data)
+        elif msg_type == MSG_SPECTATOR_START:
+            self._on_spectator_start(data)
+        elif msg_type == MSG_TASK_ASSIGN:
+            self._on_task_assign(data)
+        elif msg_type == MSG_TASK_RESULT:
+            self._on_task_result(data)
+        elif msg_type == MSG_TASK_PROGRESS:
+            self._on_task_progress(data)
+        else:
+            self._print_error(f"Unknown message type: {msg_type}")
 
         # Also call any externally registered handler
         if msg_type in self.on_message_handlers:
@@ -440,8 +450,6 @@ class GameClient:
                 show_night_banner(round_num, duration, is_mafia=True)
             elif self.role == "Detective":
                 show_night_detective(round_num, duration)
-            elif self.role == "Doctor":
-                show_night_doctor(round_num, duration)
             else:
                 show_night_banner(round_num, duration, is_mafia=False)
 
@@ -491,9 +499,6 @@ class GameClient:
         if eliminated == self.player_name:
             self.is_alive = False
             print(f"  {Fore.RED}{Style.BRIGHT}💀 YOU HAVE BEEN ELIMINATED!{Style.RESET_ALL}")
-            self._awaiting_last_words = True
-            self._last_words_name = self.player_name
-            print(f"  {Fore.YELLOW}Type your last words (10 seconds)...{Style.RESET_ALL}")
 
     def _on_game_over(self, data: dict):
         """Handle GAME_OVER — display winner, full role reveal, and match history."""
@@ -534,12 +539,6 @@ class GameClient:
 
         show_target_list(players, context)
 
-    def _on_last_words_broadcast(self, data: dict):
-        """Handle LAST_WORDS_BROADCAST — display a dead player's last words."""
-        name = data.get("player_name", "???")
-        message = data.get("message", "")
-        show_last_words(name, message)
-
     def _on_suspicion_data(self, data: dict):
         """Handle SUSPICION_DATA — display the suspicion meter."""
         mention_counts = data.get("mention_counts", {})
@@ -559,6 +558,30 @@ class GameClient:
         roles = data.get("roles", {})
         show_spectator_banner()
         show_spectator_roles(roles)
+
+    def _on_task_assign(self, data: dict):
+        """Handle TASK_ASSIGN — receive list of tasks."""
+        tasks = data.get("tasks", [])
+        message = data.get("message", "")
+        if message:
+            self._print_system(message)
+        show_task_list(tasks)
+
+    def _on_task_result(self, data: dict):
+        """Handle TASK_RESULT — task submission result."""
+        correct = data.get("correct", False)
+        message = data.get("message", "")
+        all_done = data.get("all_done", False)
+        show_task_result(correct, message)
+        if all_done:
+            self._print_system("🎉 You have completed all your tasks!")
+
+    def _on_task_progress(self, data: dict):
+        """Handle TASK_PROGRESS — global task bar update."""
+        total = data.get("total", 0)
+        completed = data.get("completed", 0)
+        percentage = data.get("percentage", 0)
+        show_task_progress(total, completed, percentage)
 
     # ──────────────────────────────────────────
     # Suspicion Tracking (client-side)
@@ -593,9 +616,6 @@ class GameClient:
 
     def get_input_prompt(self) -> str:
         """Get the appropriate input prompt based on current game state."""
-        if self._awaiting_last_words:
-            return f"  {Fore.RED}💀 Last words > {Style.RESET_ALL}"
-        
         if not self.is_alive:
             return f"  {Style.DIM}👻 (spectating) > {Style.RESET_ALL}"
         
