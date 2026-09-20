@@ -12,10 +12,10 @@ The game uses a **Client-Server Architecture** communicating over **TCP Sockets*
 - **Client:** A lightweight terminal interface that connects to the server, renders the UI (ASCII art, colors), and captures user input.
 
 ```mermaid
-graph TD
-    S[Game Server (TCP)] <-->|JSON Protocol| C1[Client 1]
-    S <-->|JSON Protocol| C2[Client 2]
-    S <-->|JSON Protocol| C3[Client N]
+flowchart TD
+    S["Game Server (TCP)"] <-->|JSON Protocol| C1["Client 1"]
+    S <-->|JSON Protocol| C2["Client 2"]
+    S <-->|JSON Protocol| C3["Client N"]
 ```
 
 ---
