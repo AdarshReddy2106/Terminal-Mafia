@@ -44,12 +44,12 @@ Examples:
         """
     )
     parser.add_argument(
-        "--host", type=str, default="localhost",
-        help="Server IP address (default: localhost)"
+        "--host", type=str, default=None,
+        help="Server IP address"
     )
     parser.add_argument(
-        "--port", type=int, default=DEFAULT_PORT,
-        help=f"Server port (default: {DEFAULT_PORT})"
+        "--port", type=int, default=None,
+        help="Server port"
     )
     parser.add_argument(
         "--name", type=str, default=None,
@@ -64,6 +64,30 @@ Examples:
     print(f"  {Fore.YELLOW}{Style.BRIGHT}  A terminal-based social deduction game{Style.RESET_ALL}")
     print()
 
+    # Get server host
+    host = args.host
+    if not host:
+        try:
+            host_input = input(f"  {Fore.CYAN}Enter server IP (press Enter for localhost):{Style.RESET_ALL} ").strip()
+            host = host_input if host_input else "localhost"
+        except (EOFError, KeyboardInterrupt):
+            print("\nGoodbye!")
+            sys.exit(0)
+
+    # Get server port
+    port = args.port
+    if not port:
+        try:
+            port_input = input(f"  {Fore.CYAN}Enter server port (press Enter for {DEFAULT_PORT}):{Style.RESET_ALL} ").strip()
+            port = int(port_input) if port_input else DEFAULT_PORT
+        except ValueError:
+            print(f"  {Fore.RED}Invalid port, using default {DEFAULT_PORT}{Style.RESET_ALL}")
+            port = DEFAULT_PORT
+        except (EOFError, KeyboardInterrupt):
+            print("\nGoodbye!")
+            sys.exit(0)
+
+
     # Get player name if not provided via args
     player_name = args.name
     if not player_name:
@@ -77,9 +101,9 @@ Examples:
         player_name = "Player"
 
     # Connect
-    print(f"\n  {Fore.YELLOW}Connecting to {args.host}:{args.port}...{Style.RESET_ALL}\n")
+    print(f"\n  {Fore.YELLOW}Connecting to {host}:{port}...{Style.RESET_ALL}\n")
 
-    client = GameClient(host=args.host, port=args.port, player_name=player_name)
+    client = GameClient(host=host, port=port, player_name=player_name)
 
     if not client.connect():
         print(f"\n  {Fore.RED}Failed to connect. Make sure the server is running.{Style.RESET_ALL}")
