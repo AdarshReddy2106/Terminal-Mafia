@@ -108,9 +108,3 @@ During the game, typing anything in the console acts as a normal chat message. H
 Interested in how it was built? Terminal Mafia uses a heavily multi-threaded TCP socket architecture with a strict JSON message protocol to ensure no client can cheat or intercept private data. 
 
 Check out the [Technical Architecture Guide](TECHNICAL_ARCHITECTURE.md) for a deep dive into the Game Engine, Server structure, and Client Display engine!
-
----
-
-<div align="center">
-  <i>Built with ❤️ for the IAC Hackathon</i>
-</div>
